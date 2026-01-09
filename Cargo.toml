@@ -1,0 +1,36 @@
+[package]
+name = "praborrow-prover"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SMT-based formal verification for PraBorrow. Interfaces with Z3 theorem prover to mathematically validate Constitution invariants."
+keywords = ["formal-verification", "smt", "z3", "proof", "invariant"]
+categories = ["development-tools", "rust-patterns", "science"]
+
+[features]
+default = []
+# Enable Z3 solver integration. Requires Z3 to be installed or available.
+# On Windows: Download Z3 from https://github.com/Z3Prover/z3/releases and set Z3_SYS_Z3_HEADER and related env vars.
+# Without this feature, a stub implementation is used that always returns Ok.
+z3-backend = ["dep:z3"]
+
+[dependencies]
+# Z3 SMT Solver bindings - optional, requires Z3 installation
+z3 = { version = "0.12", optional = true }
+
+# Error handling
+thiserror = "2.0"
+
+# Lazy initialization for global solver context  
+lazy_static = "1.4"
+
+# Hashing for verification cache
+sha2 = "0.10"
+
+# Core types (CheckProtocol, etc.)
+praborrow-core = { path = "../praborrow-core", version = "0.3.0" }
+
+[dev-dependencies]
+# For integration testing
