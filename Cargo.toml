@@ -10,7 +10,7 @@ keywords = ["formal-verification", "smt", "z3", "proof", "invariant"]
 categories = ["development-tools", "rust-patterns", "science"]
 
 [features]
-default = ["std", "z3-backend"]
+default = ["std"]
 std = ["praborrow-core/std"]
 # Enable Z3 solver integration. Requires Z3 to be installed or available.
 # On Windows: Download Z3 from https://github.com/Z3Prover/z3/releases and set Z3_SYS_Z3_HEADER and related env vars.
