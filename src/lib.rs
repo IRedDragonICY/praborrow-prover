@@ -119,11 +119,6 @@ impl Default for VerificationToken {
     }
 }
 
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Result of a cached verification lookup.
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
