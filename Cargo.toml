@@ -10,7 +10,8 @@ keywords = ["formal-verification", "smt", "z3", "proof", "invariant"]
 categories = ["development-tools", "rust-patterns", "science"]
 
 [features]
-default = []
+default = ["std", "z3-backend"]
+std = ["praborrow-core/std"]
 # Enable Z3 solver integration. Requires Z3 to be installed or available.
 # On Windows: Download Z3 from https://github.com/Z3Prover/z3/releases and set Z3_SYS_Z3_HEADER and related env vars.
 # Without this feature, a stub implementation is used that always returns Ok.
@@ -21,7 +22,7 @@ z3-backend = ["dep:z3"]
 z3 = { version = "0.12", optional = true }
 
 # Error handling
-thiserror = "2.0"
+thiserror = { version = "2.0", default-features = false }
 
 # Lazy initialization for global solver context  
 lazy_static = "1.4"
@@ -30,7 +31,7 @@ lazy_static = "1.4"
 sha2 = "0.10"
 
 # Core types (CheckProtocol, etc.)
-praborrow-core = { path = "../praborrow-core", version = "0.3.0" }
+praborrow-core = { path = "../praborrow-core", version = "0.4.0", default-features = false }
 
 [dev-dependencies]
 # For integration testing

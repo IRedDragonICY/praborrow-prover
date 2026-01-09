@@ -35,12 +35,23 @@
 
 pub mod parser;
 
+pub mod parser;
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+#[cfg(feature = "std")]
 use std::collections::HashMap;
+#[cfg(feature = "std")]
 use std::sync::Mutex;
 
+#[cfg(feature = "std")]
 use lazy_static::lazy_static;
 use sha2::{Sha256, Digest};
 use thiserror::Error;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
@@ -108,7 +119,13 @@ impl Default for VerificationToken {
     }
 }
 
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Result of a cached verification lookup.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheResult {
     /// Verification was previously successful.
@@ -125,10 +142,12 @@ pub enum CacheResult {
 /// - The type name
 /// - The field values (serialized)
 /// - The invariant expressions
+#[cfg(feature = "std")]
 pub struct VerificationCache {
     inner: Mutex<HashMap<[u8; 32], bool>>,
 }
 
+#[cfg(feature = "std")]
 impl VerificationCache {
     /// Creates a new empty cache.
     pub fn new() -> Self {
@@ -171,12 +190,14 @@ impl VerificationCache {
     }
 }
 
+#[cfg(feature = "std")]
 impl Default for VerificationCache {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "std")]
 lazy_static! {
     /// Global verification cache for optimistic verification.
     pub static ref GLOBAL_CACHE: VerificationCache = VerificationCache::new();
@@ -324,22 +345,30 @@ pub trait ProveInvariant {
     where
         Self: Sized,
     {
-        let type_name = std::any::type_name::<Self>();
-        let data_hash = self.compute_data_hash();
-        let invariants = Self::invariant_expressions();
-        
-        let cache_key = VerificationCache::compute_key(type_name, &data_hash, invariants);
-        
-        match GLOBAL_CACHE.lookup(&cache_key) {
-            CacheResult::Hit => Ok(VerificationToken::new()),
-            CacheResult::Failed => Err(ProofError::InvariantViolated(
-                "Cached: invariant previously failed".to_string()
-            )),
-            CacheResult::Miss => {
-                let result = self.verify();
-                GLOBAL_CACHE.store(cache_key, result.is_ok());
-                result
+        #[cfg(feature = "std")]
+        {
+            let type_name = std::any::type_name::<Self>();
+            let data_hash = self.compute_data_hash();
+            let invariants = Self::invariant_expressions();
+            
+            let cache_key = VerificationCache::compute_key(type_name, &data_hash, invariants);
+            
+            match GLOBAL_CACHE.lookup(&cache_key) {
+                CacheResult::Hit => Ok(VerificationToken::new()),
+                CacheResult::Failed => Err(ProofError::InvariantViolated(
+                    "Cached: invariant previously failed".to_string()
+                )),
+                CacheResult::Miss => {
+                    let result = self.verify();
+                    GLOBAL_CACHE.store(cache_key, result.is_ok());
+                    result
+                }
             }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            // In no_std, we skip caching and verify directly
+            self.verify()
         }
     }
 }
@@ -411,6 +440,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<VerificationToken>(), 0);
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_cache_operations() {
         let cache = VerificationCache::new();
@@ -429,6 +459,7 @@ mod tests {
         assert_eq!(cache.lookup(&key), CacheResult::Miss);
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_cache_key_computation() {
         let key1 = VerificationCache::compute_key("MyType", &[1, 2, 3], &["x > 0"]);

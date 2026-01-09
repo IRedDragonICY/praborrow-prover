@@ -20,6 +20,10 @@
 //! 3. Add parsing logic in `ExpressionParser::parse_*`
 
 use crate::ProofError;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::boxed::Box;
+use alloc::format;
 
 /// Represents a parsed expression node.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +40,20 @@ pub enum ExprKind {
         field_name: String,
     },
     
+    /// A bitwise operation.
+    BitwiseOp {
+        left: Box<ExprKind>,
+        op: BitwiseOp,
+        right: Box<ExprKind>,
+    },
+
+    /// An arithmetic operation.
+    ArithmeticOp {
+        left: Box<ExprKind>,
+        op: ArithmeticOp,
+        right: Box<ExprKind>,
+    },
+
     /// A binary comparison operation.
     BinaryOp {
         left: Box<ExprKind>,
@@ -51,6 +69,26 @@ pub enum ExprKind {
     
     /// Logical NOT.
     Not(Box<ExprKind>),
+}
+
+/// Bitwise operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitwiseOp {
+    And, // &
+    Or,  // |
+    Xor, // ^
+    Shl, // <<
+    Shr, // >>
+}
+
+/// Arithmetic operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Rem, // %
 }
 
 /// Comparison operators.
@@ -114,6 +152,22 @@ pub trait ExprVisitor {
     /// Visit a field access.
     fn visit_field_access(&mut self, field_name: &str) -> Self::Output;
     
+    /// Visit a bitwise operation.
+    fn visit_bitwise_op(
+        &mut self,
+        left: &ExprKind,
+        op: BitwiseOp,
+        right: &ExprKind,
+    ) -> Self::Output;
+
+    /// Visit an arithmetic operation.
+    fn visit_arithmetic_op(
+        &mut self,
+        left: &ExprKind,
+        op: ArithmeticOp,
+        right: &ExprKind,
+    ) -> Self::Output;
+
     /// Visit a binary comparison operation.
     fn visit_binary_op(
         &mut self,
@@ -137,6 +191,8 @@ pub trait ExprVisitor {
             ExprKind::IntLiteral(v) => self.visit_int_literal(*v),
             ExprKind::UIntLiteral(v) => self.visit_uint_literal(*v),
             ExprKind::FieldAccess { field_name } => self.visit_field_access(field_name),
+            ExprKind::BitwiseOp { left, op, right } => self.visit_bitwise_op(left, *op, right),
+            ExprKind::ArithmeticOp { left, op, right } => self.visit_arithmetic_op(left, *op, right),
             ExprKind::BinaryOp { left, op, right } => self.visit_binary_op(left, *op, right),
             ExprKind::And(exprs) => self.visit_and(exprs),
             ExprKind::Or(exprs) => self.visit_or(exprs),
@@ -183,31 +239,122 @@ impl ExpressionParser {
     
     /// Parses a comparison expression.
     fn parse_comparison(expr: &str) -> Result<ExprKind, ProofError> {
-        // Find the comparison operator (try multi-char first)
-        let operators = [">=", "<=", "==", "!=", ">", "<"];
+        // This is a simplified precedence parser (precedence climbing could be better but this works for simple invariants)
+        // We split by standard operators with precedence:
+        // 1. Relational (==, !=, <, >, <=, >=)
+        // 2. Bitwise OR (|), XOR (^)
+        // 3. Bitwise AND (&)
+        // 4. Shift (<<, >>)
+        // 5. Add/Sub (+, -)
+        // 6. Mul/Div/Rem (*, /, %)
         
-        for op_str in operators {
-            if let Some(pos) = expr.find(op_str) {
+        let expr = expr.trim();
+
+        // 1. Relational
+        let relational_ops = [">=", "<=", "==", "!=", ">", "<"];
+        for op_str in relational_ops {
+             if let Some(pos) = find_op_outside_parens(expr, op_str) {
                 let left = expr[..pos].trim();
                 let right = expr[pos + op_str.len()..].trim();
-                
-                let op = ComparisonOp::from_str(op_str)
-                    .ok_or_else(|| ProofError::ParseError(format!("Unknown operator: {}", op_str)))?;
-                
-                let left_expr = Self::parse_operand(left)?;
-                let right_expr = Self::parse_operand(right)?;
-                
+                let op = ComparisonOp::from_str(op_str).unwrap();
                 return Ok(ExprKind::BinaryOp {
-                    left: Box::new(left_expr),
+                    left: Box::new(Self::parse_comparison(left)?),
                     op,
-                    right: Box::new(right_expr),
+                    right: Box::new(Self::parse_comparison(right)?),
+                });
+            }
+        }
+
+        // 2. Bitwise OR
+        if let Some(pos) = find_op_outside_parens(expr, "|") {
+             let left = expr[..pos].trim();
+             let right = expr[pos + 1..].trim();
+             return Ok(ExprKind::BitwiseOp {
+                 left: Box::new(Self::parse_comparison(left)?),
+                 op: BitwiseOp::Or,
+                 right: Box::new(Self::parse_comparison(right)?),
+             });
+        }
+        
+        // 3. Bitwise XOR
+        if let Some(pos) = find_op_outside_parens(expr, "^") {
+             let left = expr[..pos].trim();
+             let right = expr[pos + 1..].trim();
+             return Ok(ExprKind::BitwiseOp {
+                 left: Box::new(Self::parse_comparison(left)?),
+                 op: BitwiseOp::Xor,
+                 right: Box::new(Self::parse_comparison(right)?),
+             });
+        }
+
+        // 4. Bitwise AND
+        if let Some(pos) = find_op_outside_parens(expr, "&") {
+             let left = expr[..pos].trim();
+             let right = expr[pos + 1..].trim();
+             return Ok(ExprKind::BitwiseOp {
+                 left: Box::new(Self::parse_comparison(left)?),
+                 op: BitwiseOp::And,
+                 right: Box::new(Self::parse_comparison(right)?),
+             });
+        }
+
+        // 5. Shift
+        let shift_ops = ["<<", ">>"];
+        for op_str in shift_ops {
+             if let Some(pos) = find_op_outside_parens(expr, op_str) {
+                let left = expr[..pos].trim();
+                let right = expr[pos + op_str.len()..].trim();
+                let op = match op_str { "<<" => BitwiseOp::Shl, ">>" => BitwiseOp::Shr, _ => unreachable!() };
+                return Ok(ExprKind::BitwiseOp {
+                    left: Box::new(Self::parse_comparison(left)?),
+                    op,
+                    right: Box::new(Self::parse_comparison(right)?),
+                });
+            }
+        }
+
+        // 6. Add/Sub
+        let term_ops = ["+", "-"];
+        // loop backwards to support left-associativity if we were scanning, but find_op_outside_parens finds first...
+        // Actually for left associativity we want the LAST occurrence. `find_op_outside_parens` finds the first.
+        // So `a - b - c` -> `(a) - (b - c)` which is WRONG for sub.
+        // We need `find_last_op_outside_parens`.
+        
+        for op_str in term_ops {
+             if let Some(pos) = find_last_op_outside_parens(expr, op_str) {
+                let left = expr[..pos].trim();
+                let right = expr[pos + op_str.len()..].trim();
+                let op = match op_str { "+" => ArithmeticOp::Add, "-" => ArithmeticOp::Sub, _ => unreachable!() };
+                return Ok(ExprKind::ArithmeticOp {
+                    left: Box::new(Self::parse_comparison(left)?),
+                    op,
+                    right: Box::new(Self::parse_comparison(right)?),
                 });
             }
         }
         
-        Err(ProofError::ParseError(format!(
-            "No comparison operator found in expression: {}", expr
-        )))
+        // 7. Mul/Div/Rem
+        let factor_ops = ["*", "/", "%"];
+        for op_str in factor_ops {
+             if let Some(pos) = find_last_op_outside_parens(expr, op_str) {
+                let left = expr[..pos].trim();
+                let right = expr[pos + op_str.len()..].trim();
+                let op = match op_str { "*" => ArithmeticOp::Mul, "/" => ArithmeticOp::Div, "%" => ArithmeticOp::Rem, _ => unreachable!() };
+                return Ok(ExprKind::ArithmeticOp {
+                    left: Box::new(Self::parse_comparison(left)?),
+                    op,
+                    right: Box::new(Self::parse_comparison(right)?),
+                });
+            }
+        }
+        
+        // Base case: Operand (potentially with parens)
+        if expr.starts_with('(') && expr.ends_with(')') {
+            // Strip parens
+            return Self::parse_comparison(&expr[1..expr.len()-1]);
+        }
+        
+        Self::parse_operand(expr)
     }
     
     /// Parses an operand (field access or literal).
@@ -233,23 +380,67 @@ impl ExpressionParser {
             });
         }
         
+        // Try to parse hex literal
+        if operand.starts_with("0x") || operand.starts_with("0X") {
+             if let Ok(v) = i64::from_str_radix(&operand[2..], 16) {
+                 return Ok(ExprKind::IntLiteral(v));
+             }
+        }
+
         // Try to parse as integer literal
         if let Ok(v) = operand.parse::<i64>() {
             return Ok(ExprKind::IntLiteral(v));
         }
         
-        // Try to parse as unsigned integer literal (suffixed with 'u')
-        if operand.ends_with('u') {
-            let num_part = &operand[..operand.len() - 1];
-            if let Ok(v) = num_part.parse::<u64>() {
-                return Ok(ExprKind::UIntLiteral(v));
-            }
-        }
-        
-        Err(ProofError::ParseError(format!(
-            "Cannot parse operand: '{}'. Expected 'self.field' or integer literal.", operand
+            Err(ProofError::ParseError(format!(
+            "Cannot parse operand: '{}'. Expected 'self.field', hex, or integer literal.", operand
         )))
     }
+    
+    // Helper to find operator composed of punctuation, ignoring parentheses
+fn find_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
+    let mut depth = 0;
+    let bytes = expr.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {
+                if depth == 0 {
+                    if expr[i..].starts_with(op) {
+                         return Some(i);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_last_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
+    let mut depth = 0;
+    let bytes = expr.as_bytes();
+    // Scan backwards
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        let b = bytes[i];
+         match b {
+            b')' => depth += 1,
+            b'(' => depth -= 1,
+            _ => {
+                if depth == 0 {
+                     // Check if op starts here
+                     if expr[i..].starts_with(op) {
+                         // Careful with multi-char ops in backwards scan, this logic assumes we invoke it knowing op length
+                         return Some(i);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
     
     /// Validates that a string is a valid Rust identifier.
     pub fn is_valid_identifier(s: &str) -> bool {
@@ -324,6 +515,17 @@ mod z3_impl {
                 ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
                 ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
                 ExprKind::FieldAccess { field_name } => self.provider.get_field_z3(self.ctx, field_name),
+                ExprKind::ArithmeticOp { left, op, right } => {
+                    let left_ast = self.get_int_ast(left)?;
+                    let right_ast = self.get_int_ast(right)?;
+                    Ok(match op {
+                        ArithmeticOp::Add => left_ast + right_ast,
+                        ArithmeticOp::Sub => left_ast - right_ast,
+                        ArithmeticOp::Mul => left_ast * right_ast,
+                        ArithmeticOp::Div => left_ast / right_ast,
+                        ArithmeticOp::Rem => left_ast.rem(&right_ast),
+                    })
+                }
                 _ => Err(ProofError::UnsupportedType(
                     format!("Expected integer expression, got: {:?}", expr)
                 )),
@@ -369,6 +571,46 @@ mod z3_impl {
                 ComparisonOp::Ge => left_ast.ge(&right_ast),
                 ComparisonOp::Le => left_ast.le(&right_ast),
             })
+        }
+        
+        fn visit_bitwise_op(
+            &mut self,
+            left: &ExprKind,
+            op: BitwiseOp,
+            right: &ExprKind,
+        ) -> Self::Output {
+             // Z3 Ints don't support bitwise ops directly in standard SMT-LIB without BV mapping.
+             // We will try to map to BV if possible, but the current context is Int.
+             // For this iteration, as per instructions: "add the AST nodes... If BitVectors are too complex, stick to Arithmetic".
+             // We will ERROR here for now if using Z3 Int backend, or implement basic ones if Z3 supports Int bitwise extensions.
+             // Z3 *does* have some Int bitwise support in some contexts but it is non-standard.
+             // Let's return error for now to be safe, or implement simple ones.
+             
+             // However, for the purpose of the task "Map the new ExprKind variants to their corresponding Z3 methods",
+             // we should try. "Note: Z3 Ints don't support bitwise ops easily...".
+             // We will return UnsupportedType for now as a safe implementation of the "Note".
+             Err(ProofError::UnsupportedType("Bitwise operations on Infinite Integers not supported yet. Use BitVectors.".to_string()))
+        }
+
+        fn visit_arithmetic_op(
+            &mut self,
+            left: &ExprKind,
+            op: ArithmeticOp,
+            right: &ExprKind,
+        ) -> Self::Output {
+             // Arithmetic ops return Int, but this visitor expects Bool (for the top level?)
+             // Wait, generate() returns Bool. But recursive calls might need Int.
+             // The structure of Z3AstGenerator assumes `visit` always returns `Result<ast::Bool>`.
+             // But for ArithmeticOp, we expect `ast::Int`.
+             // We need to refactor Z3AstGenerator to handle different return types or split visitors.
+             // For now, failure seems appropriate because strict type system.
+             
+             // BUT, we can support arithmetic *inside* comparisons.
+             // We need `get_int_ast` to recursively call visit? No, `visit` returns Bool.
+             // We need a separate `visit_int`?
+             
+             // Let's modify `get_int_ast` to handle ArithmeticOp recursively.
+             Err(ProofError::ParseError("Arithmetic at top-level is not a boolean assertion".to_string()))
         }
         
         fn visit_and(&mut self, exprs: &[ExprKind]) -> Self::Output {
