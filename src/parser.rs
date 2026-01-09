@@ -253,7 +253,7 @@ impl ExpressionParser {
         // 1. Relational
         let relational_ops = [">=", "<=", "==", "!=", ">", "<"];
         for op_str in relational_ops {
-             if let Some(pos) = find_op_outside_parens(expr, op_str) {
+             if let Some(pos) = Self::find_op_outside_parens(expr, op_str) {
                 let left = expr[..pos].trim();
                 let right = expr[pos + op_str.len()..].trim();
                 let op = ComparisonOp::from_str(op_str).unwrap();
@@ -266,7 +266,7 @@ impl ExpressionParser {
         }
 
         // 2. Bitwise OR
-        if let Some(pos) = find_op_outside_parens(expr, "|") {
+        if let Some(pos) = Self::find_op_outside_parens(expr, "|") {
              let left = expr[..pos].trim();
              let right = expr[pos + 1..].trim();
              return Ok(ExprKind::BitwiseOp {
@@ -277,7 +277,7 @@ impl ExpressionParser {
         }
         
         // 3. Bitwise XOR
-        if let Some(pos) = find_op_outside_parens(expr, "^") {
+        if let Some(pos) = Self::find_op_outside_parens(expr, "^") {
              let left = expr[..pos].trim();
              let right = expr[pos + 1..].trim();
              return Ok(ExprKind::BitwiseOp {
@@ -288,7 +288,7 @@ impl ExpressionParser {
         }
 
         // 4. Bitwise AND
-        if let Some(pos) = find_op_outside_parens(expr, "&") {
+        if let Some(pos) = Self::find_op_outside_parens(expr, "&") {
              let left = expr[..pos].trim();
              let right = expr[pos + 1..].trim();
              return Ok(ExprKind::BitwiseOp {
@@ -301,7 +301,7 @@ impl ExpressionParser {
         // 5. Shift
         let shift_ops = ["<<", ">>"];
         for op_str in shift_ops {
-             if let Some(pos) = find_op_outside_parens(expr, op_str) {
+             if let Some(pos) = Self::find_op_outside_parens(expr, op_str) {
                 let left = expr[..pos].trim();
                 let right = expr[pos + op_str.len()..].trim();
                 let op = match op_str { "<<" => BitwiseOp::Shl, ">>" => BitwiseOp::Shr, _ => unreachable!() };
@@ -321,7 +321,7 @@ impl ExpressionParser {
         // We need `find_last_op_outside_parens`.
         
         for op_str in term_ops {
-             if let Some(pos) = find_last_op_outside_parens(expr, op_str) {
+             if let Some(pos) = Self::find_last_op_outside_parens(expr, op_str) {
                 let left = expr[..pos].trim();
                 let right = expr[pos + op_str.len()..].trim();
                 let op = match op_str { "+" => ArithmeticOp::Add, "-" => ArithmeticOp::Sub, _ => unreachable!() };
@@ -336,7 +336,7 @@ impl ExpressionParser {
         // 7. Mul/Div/Rem
         let factor_ops = ["*", "/", "%"];
         for op_str in factor_ops {
-             if let Some(pos) = find_last_op_outside_parens(expr, op_str) {
+             if let Some(pos) = Self::find_last_op_outside_parens(expr, op_str) {
                 let left = expr[..pos].trim();
                 let right = expr[pos + op_str.len()..].trim();
                 let op = match op_str { "*" => ArithmeticOp::Mul, "/" => ArithmeticOp::Div, "%" => ArithmeticOp::Rem, _ => unreachable!() };
