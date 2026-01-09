@@ -33,11 +33,9 @@
 //! // result is VerificationToken - proof that invariants hold
 //! ```
 
-pub mod parser;
-
-pub mod parser;
-
 #![cfg_attr(not(feature = "std"), no_std)]
+
+pub mod parser;
 
 extern crate alloc;
 
