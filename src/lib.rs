@@ -245,32 +245,27 @@ mod z3_backend {
     /// Z3 contexts are NOT thread-safe. Each thread should create its own `SmtContext`.
     /// The global cache (`GLOBAL_CACHE`) is thread-safe and can be shared.
     pub struct SmtContext {
-        pub(crate) context: Context,
-        // Note: Solver is created on-demand to avoid lifetime issues
+        // Z3 context is thread-local in 0.19+
+        _private: (),
     }
 
     impl SmtContext {
         /// Creates a new SMT context with default configuration.
         pub fn new() -> Result<Self, ProofError> {
-            let config = Config::new();
-            let context = Context::new(&config);
-            Ok(Self { context })
-        }
-
-        /// Returns a reference to the Z3 context.
-        pub fn context(&self) -> &Context {
-            &self.context
+            let _config = Config::new();
+            // In z3 0.19+, context is implicit/thread-local or global
+            Ok(Self { _private: () })
         }
 
         /// Creates a new solver for this context.
         pub fn new_solver(&self) -> Solver {
-            Solver::new(&self.context)
+            Solver::new()
         }
 
         /// Checks if assertions are satisfiable using a fresh solver.
         pub fn check_assertions<'a, I>(&'a self, assertions: I) -> Result<VerificationToken, ProofError>
         where
-            I: IntoIterator<Item = &'a z3::ast::Bool<'a>>,
+            I: IntoIterator<Item = &'a z3::ast::Bool>,
         {
             let solver = self.new_solver();
             for assertion in assertions {
@@ -287,9 +282,9 @@ mod z3_backend {
         }
 
         /// Verifies a set of invariants using the provided field provider.
-        pub fn verify_invariants<'ctx, P>(&'ctx self, provider: &P, invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        pub fn verify_invariants<P>(&self, provider: &P, invariants: &[&str]) -> Result<VerificationToken, ProofError>
         where
-            P: crate::parser::FieldValueProvider<'ctx> + ?Sized,
+            P: crate::parser::FieldValueProvider + ?Sized,
         {
             use crate::parser::{ExpressionParser, Z3AstGenerator};
             let mut assertions = Vec::new(); // Store AST nodes here if needed, but they are bound to context
@@ -299,7 +294,7 @@ mod z3_backend {
             
             for inv in invariants {
                 let expr = ExpressionParser::parse(inv)?;
-                let mut generator = Z3AstGenerator::new(&self.context, provider);
+                let mut generator = Z3AstGenerator::new(provider);
                 let assertion = generator.generate(&expr)?;
                 bools.push(assertion);
             }
@@ -368,9 +363,9 @@ mod stub_backend {
             Ok(VerificationToken::new())
         }
 
-        pub fn verify_invariants<'ctx, P>(&'ctx self, _provider: &P, _invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        pub fn verify_invariants<P>(&self, _provider: &P, _invariants: &[&str]) -> Result<VerificationToken, ProofError>
         where
-            P: crate::parser::FieldValueProvider<'ctx> + ?Sized,
+            P: crate::parser::FieldValueProvider + ?Sized,
         {
             self.verify_stub()
         }
@@ -469,12 +464,12 @@ pub trait ProveInvariant {
 
 /// Trait for types that can provide field values to the SMT solver.
 #[cfg(feature = "z3-backend")]
-pub trait ToZ3Ast<'ctx> {
+pub trait ToZ3Ast {
     /// The Z3 AST type for this Rust type.
     type Ast;
 
     /// Converts this value to a Z3 AST node.
-    fn to_z3_ast(&self, ctx: &'ctx Context, name: &str) -> Self::Ast;
+    fn to_z3_ast(&self, name: &str) -> Self::Ast;
 }
 
 #[cfg(feature = "z3-backend")]
@@ -484,11 +479,11 @@ mod z3_impls {
     macro_rules! impl_to_z3_int {
         ($($ty:ty),*) => {
             $(
-                impl<'ctx> ToZ3Ast<'ctx> for $ty {
-                    type Ast = z3::ast::Int<'ctx>;
+                impl ToZ3Ast for $ty {
+                    type Ast = z3::ast::Int;
 
-                    fn to_z3_ast(&self, ctx: &'ctx Context, _name: &str) -> Self::Ast {
-                        z3::ast::Int::from_i64(ctx, *self as i64)
+                    fn to_z3_ast(&self, _name: &str) -> Self::Ast {
+                        z3::ast::Int::from_i64(*self as i64)
                     }
                 }
             )*
@@ -500,11 +495,11 @@ mod z3_impls {
     macro_rules! impl_to_z3_uint {
         ($($ty:ty),*) => {
             $(
-                impl<'ctx> ToZ3Ast<'ctx> for $ty {
-                    type Ast = z3::ast::Int<'ctx>;
+                impl ToZ3Ast for $ty {
+                    type Ast = z3::ast::Int;
 
-                    fn to_z3_ast(&self, ctx: &'ctx Context, _name: &str) -> Self::Ast {
-                        z3::ast::Int::from_u64(ctx, *self as u64)
+                    fn to_z3_ast(&self, _name: &str) -> Self::Ast {
+                        z3::ast::Int::from_u64(*self as u64)
                     }
                 }
             )*

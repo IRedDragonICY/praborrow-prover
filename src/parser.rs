@@ -428,14 +428,14 @@ impl ExpressionParser {
 // Verification Interfaces (Used by Macro)
 // ============================================================================
 
-use crate::{Context, ast};
+use crate::ast;
 
 /// Field value provider for Z3 AST generation.
 ///
 /// This trait is implemented by generated code to map field names to Z3 AST nodes.
-pub trait FieldValueProvider<'ctx> {
+pub trait FieldValueProvider {
     /// Returns the Z3 AST for a field, or an error if the field doesn't exist.
-    fn get_field_z3(&self, ctx: &'ctx Context, field_name: &str) -> Result<ast::Int<'ctx>, ProofError>;
+    fn get_field_z3(&self, field_name: &str) -> Result<ast::Int, ProofError>;
 }
 
 // ============================================================================
@@ -568,16 +568,16 @@ mod z3_impl {
         }
         
         /// Generates a Z3 boolean assertion from an expression.
-        pub fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool<'ctx>, ProofError> {
+        pub fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool, ProofError> {
             self.visit(expr)
         }
         
         /// Helper to get an integer AST from an expression.
-        fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int<'ctx>, ProofError> {
+        fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
-                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
-                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
-                ExprKind::FieldAccess { field_name } => self.provider.get_field_z3(self.ctx, field_name),
+                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(*v)),
+                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(*v)),
+                ExprKind::FieldAccess { field_name } => self.provider.get_field_z3(field_name),
                 ExprKind::ArithmeticOp { left, op, right } => {
                     let left_ast = self.get_int_ast(left)?;
                     let right_ast = self.get_int_ast(right)?;
@@ -597,7 +597,7 @@ mod z3_impl {
     }
 
     impl<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> ExprVisitor for Z3AstGenerator<'ctx, 'prov, P> {
-        type Output = Result<ast::Bool<'ctx>, ProofError>;
+        type Output = Result<ast::Bool, ProofError>;
         
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
             Err(ProofError::ParseError(
@@ -659,14 +659,14 @@ mod z3_impl {
             let bools: Result<Vec<_>, _> = exprs.iter().map(|e| self.visit(e)).collect();
             let bools = bools?;
             let refs: Vec<_> = bools.iter().collect();
-            Ok(ast::Bool::and(self.ctx, &refs))
+            Ok(ast::Bool::and(&refs))
         }
         
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
             let bools: Result<Vec<_>, _> = exprs.iter().map(|e| self.visit(e)).collect();
             let bools = bools?;
             let refs: Vec<_> = bools.iter().collect();
-            Ok(ast::Bool::or(self.ctx, &refs))
+            Ok(ast::Bool::or(&refs))
         }
         
         fn visit_not(&mut self, expr: &ExprKind) -> Self::Output {
