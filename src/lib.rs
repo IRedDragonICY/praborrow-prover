@@ -49,9 +49,10 @@ use std::num::NonZeroUsize;
 
 #[cfg(feature = "std")]
 use lazy_static::lazy_static;
+#[cfg(feature = "std")]
 use sha2::{Sha256, Digest};
 use thiserror::Error;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 // ... (skipping Z3 imports which remain the same) ...

@@ -19,10 +19,10 @@ z3-backend = ["dep:z3"]
 
 [dependencies]
 # Z3 SMT Solver bindings - optional, requires Z3 installation
-z3 = { version = "0.12", optional = true }
+z3 = { version = "0.19.7", optional = true }
 
 # Error handling
-thiserror = { version = "2.0", default-features = false }
+thiserror = { version = "2.0.17", default-features = false }
 
 # Lazy initialization for global solver context  
 lazy_static = "1.4"
