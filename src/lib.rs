@@ -85,25 +85,63 @@ pub mod z3_stub {
                 Self
             }
         }
-        
+
         // Mock ops for Int
-        impl core::ops::Add for Int { type Output = Self; fn add(self, _: Self) -> Self { Self } }
-        impl core::ops::Sub for Int { type Output = Self; fn sub(self, _: Self) -> Self { Self } }
-        impl core::ops::Mul for Int { type Output = Self; fn mul(self, _: Self) -> Self { Self } }
-        impl core::ops::Div for Int { type Output = Self; fn div(self, _: Self) -> Self { Self } }
+        impl core::ops::Add for Int {
+            type Output = Self;
+            fn add(self, _: Self) -> Self {
+                Self
+            }
+        }
+        impl core::ops::Sub for Int {
+            type Output = Self;
+            fn sub(self, _: Self) -> Self {
+                Self
+            }
+        }
+        impl core::ops::Mul for Int {
+            type Output = Self;
+            fn mul(self, _: Self) -> Self {
+                Self
+            }
+        }
+        impl core::ops::Div for Int {
+            type Output = Self;
+            fn div(self, _: Self) -> Self {
+                Self
+            }
+        }
         impl Int {
-            pub fn rem(&self, _: &Self) -> Self { Self }
-            pub fn gt(&self, _: &Self) -> Bool { Bool }
-            pub fn lt(&self, _: &Self) -> Bool { Bool }
-            pub fn eq(&self, _: &Self) -> Bool { Bool }
-            pub fn ge(&self, _: &Self) -> Bool { Bool }
-            pub fn le(&self, _: &Self) -> Bool { Bool }
+            pub fn rem(&self, _: &Self) -> Self {
+                Self
+            }
+            pub fn gt(&self, _: &Self) -> Bool {
+                Bool
+            }
+            pub fn lt(&self, _: &Self) -> Bool {
+                Bool
+            }
+            pub fn eq(&self, _: &Self) -> Bool {
+                Bool
+            }
+            pub fn ge(&self, _: &Self) -> Bool {
+                Bool
+            }
+            pub fn le(&self, _: &Self) -> Bool {
+                Bool
+            }
         }
 
         impl Bool {
-            pub fn and(_: &[&Self]) -> Self { Self }
-            pub fn or(_: &[&Self]) -> Self { Self }
-            pub fn not(&self) -> Self { Self }
+            pub fn and(_: &[&Self]) -> Self {
+                Self
+            }
+            pub fn or(_: &[&Self]) -> Self {
+                Self
+            }
+            pub fn not(&self) -> Self {
+                Self
+            }
         }
     }
 }
