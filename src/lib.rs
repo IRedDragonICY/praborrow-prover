@@ -72,7 +72,7 @@ pub mod z3_stub {
     #[derive(Debug, Clone)]
     pub struct Solver;
     pub mod ast {
-        use std::marker::PhantomData;
+        use core::marker::PhantomData;
         #[derive(Debug, Clone)]
         pub struct Int<'a>(PhantomData<&'a ()>);
         #[derive(Debug, Clone)]

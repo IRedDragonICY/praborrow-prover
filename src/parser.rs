@@ -22,6 +22,7 @@
 use crate::ProofError;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use alloc::vec;
 use alloc::boxed::Box;
 use alloc::format;
 
@@ -256,226 +257,139 @@ impl ExpressionParser {
         }
     }
     
-    /// Parses a comparison expression.
+    /// Parses a comparison expression using precedence climbing.
     fn parse_comparison(expr: &str) -> Result<ExprKind, ProofError> {
-        // This is a simplified precedence parser (precedence climbing could be better but this works for simple invariants)
-        // We split by standard operators with precedence:
-        // 1. Relational (==, !=, <, >, <=, >=)
-        // 2. Bitwise OR (|), XOR (^)
-        // 3. Bitwise AND (&)
-        // 4. Shift (<<, >>)
-        // 5. Add/Sub (+, -)
-        // 6. Mul/Div/Rem (*, /, %)
-        
-        let expr = expr.trim();
-
-        // 1. Relational
-        let relational_ops = [">=", "<=", "==", "!=", ">", "<"];
-        for op_str in relational_ops {
-             if let Some(pos) = Self::find_op_outside_parens(expr, op_str) {
-                let left = expr[..pos].trim();
-                let right = expr[pos + op_str.len()..].trim();
-                let op = ComparisonOp::from_str(op_str).unwrap();
-                return Ok(ExprKind::BinaryOp {
-                    left: Box::new(Self::parse_comparison(left)?),
-                    op,
-                    right: Box::new(Self::parse_comparison(right)?),
-                });
-            }
-        }
-
-        // 2. Bitwise OR
-        if let Some(pos) = Self::find_op_outside_parens(expr, "|") {
-             let left = expr[..pos].trim();
-             let right = expr[pos + 1..].trim();
-             return Ok(ExprKind::BitwiseOp {
-                 left: Box::new(Self::parse_comparison(left)?),
-                 op: BitwiseOp::Or,
-                 right: Box::new(Self::parse_comparison(right)?),
-             });
-        }
-        
-        // 3. Bitwise XOR
-        if let Some(pos) = Self::find_op_outside_parens(expr, "^") {
-             let left = expr[..pos].trim();
-             let right = expr[pos + 1..].trim();
-             return Ok(ExprKind::BitwiseOp {
-                 left: Box::new(Self::parse_comparison(left)?),
-                 op: BitwiseOp::Xor,
-                 right: Box::new(Self::parse_comparison(right)?),
-             });
-        }
-
-        // 4. Bitwise AND
-        if let Some(pos) = Self::find_op_outside_parens(expr, "&") {
-             let left = expr[..pos].trim();
-             let right = expr[pos + 1..].trim();
-             return Ok(ExprKind::BitwiseOp {
-                 left: Box::new(Self::parse_comparison(left)?),
-                 op: BitwiseOp::And,
-                 right: Box::new(Self::parse_comparison(right)?),
-             });
-        }
-
-        // 5. Shift
-        let shift_ops = ["<<", ">>"];
-        for op_str in shift_ops {
-             if let Some(pos) = Self::find_op_outside_parens(expr, op_str) {
-                let left = expr[..pos].trim();
-                let right = expr[pos + op_str.len()..].trim();
-                let op = match op_str { "<<" => BitwiseOp::Shl, ">>" => BitwiseOp::Shr, _ => unreachable!() };
-                return Ok(ExprKind::BitwiseOp {
-                    left: Box::new(Self::parse_comparison(left)?),
-                    op,
-                    right: Box::new(Self::parse_comparison(right)?),
-                });
-            }
-        }
-
-        // 6. Add/Sub
-        let term_ops = ["+", "-"];
-        // loop backwards to support left-associativity if we were scanning, but find_op_outside_parens finds first...
-        // Actually for left associativity we want the LAST occurrence. `find_op_outside_parens` finds the first.
-        // So `a - b - c` -> `(a) - (b - c)` which is WRONG for sub.
-        // We need `find_last_op_outside_parens`.
-        
-        for op_str in term_ops {
-             if let Some(pos) = Self::find_last_op_outside_parens(expr, op_str) {
-                let left = expr[..pos].trim();
-                let right = expr[pos + op_str.len()..].trim();
-                let op = match op_str { "+" => ArithmeticOp::Add, "-" => ArithmeticOp::Sub, _ => unreachable!() };
-                return Ok(ExprKind::ArithmeticOp {
-                    left: Box::new(Self::parse_comparison(left)?),
-                    op,
-                    right: Box::new(Self::parse_comparison(right)?),
-                });
-            }
-        }
-        
-        // 7. Mul/Div/Rem
-        let factor_ops = ["*", "/", "%"];
-        for op_str in factor_ops {
-             if let Some(pos) = Self::find_last_op_outside_parens(expr, op_str) {
-                let left = expr[..pos].trim();
-                let right = expr[pos + op_str.len()..].trim();
-                let op = match op_str { "*" => ArithmeticOp::Mul, "/" => ArithmeticOp::Div, "%" => ArithmeticOp::Rem, _ => unreachable!() };
-                return Ok(ExprKind::ArithmeticOp {
-                    left: Box::new(Self::parse_comparison(left)?),
-                    op,
-                    right: Box::new(Self::parse_comparison(right)?),
-                });
-            }
-        }
-        
-        // Base case: Operand (potentially with parens)
-        if expr.starts_with('(') && expr.ends_with(')') {
-            // Strip parens
-            return Self::parse_comparison(&expr[1..expr.len()-1]);
-        }
-        
-        Self::parse_operand(expr)
+        let tokens = Tokenizer::tokenize(expr)?;
+        let (expr, _) = Self::parse_expression_climbing(&tokens, 0)?;
+        Ok(expr)
     }
-    
-    /// Parses an operand (field access or literal).
-    fn parse_operand(operand: &str) -> Result<ExprKind, ProofError> {
-        let operand = operand.trim();
-        
-        // Check for field access (self.field_name)
-        if operand.starts_with("self.") {
-            let field_name = &operand[5..];
-            if field_name.is_empty() {
-                return Err(ProofError::ParseError(
-                    "Empty field name after 'self.'".to_string()
-                ));
-            }
-            // Validate identifier
-            if !Self::is_valid_identifier(field_name) {
-                return Err(ProofError::ParseError(format!(
-                    "Invalid field name: {}", field_name
-                )));
-            }
-            return Ok(ExprKind::FieldAccess {
-                field_name: field_name.to_string(),
-            });
+
+    /// Precedence climbing parser.
+    fn parse_expression_climbing(tokens: &[Token], min_precedence: u8) -> Result<(ExprKind, usize), ProofError> {
+        if tokens.is_empty() {
+             return Err(ProofError::ParseError("Unexpected end of expression".to_string()));
         }
-        
-        // Try to parse hex literal
-        if operand.starts_with("0x") || operand.starts_with("0X") {
-             if let Ok(v) = i64::from_str_radix(&operand[2..], 16) {
-                 return Ok(ExprKind::IntLiteral(v));
+
+        // 1. Parse LHS (atom)
+        let (mut lhs, mut idx) = Self::parse_atom(tokens)?;
+
+        // 2. Loop while next token is operator with precedence >= min_precedence
+        while idx < tokens.len() {
+             let token = &tokens[idx];
+             
+             if let Token::Op(op_str) = token {
+                 let precedence = Self::get_precedence(op_str);
+                 if precedence < min_precedence {
+                     break;
+                 }
+                 
+                 let op_str = op_str.clone();
+                 idx += 1; // consume operator
+                 
+                 // 3. Parse RHS with higher precedence
+                 // Right-associativity -> min_precedence = precedence
+                 // Left-associativity -> min_precedence = precedence + 1
+                 // We'll use left-associativity for most standard ops
+                 let next_min_precedence = precedence + 1;
+                 
+                 let (rhs, rhs_consumed) = Self::parse_expression_climbing(&tokens[idx..], next_min_precedence)?;
+                 idx += rhs_consumed;
+                 
+                 lhs = Self::combine_expr(lhs, &op_str, rhs)?;
+             } else {
+                 break;
              }
         }
-
-        // Try to parse as integer literal
-        if let Ok(v) = operand.parse::<i64>() {
-            return Ok(ExprKind::IntLiteral(v));
-        }
         
-            Err(ProofError::ParseError(format!(
-            "Cannot parse operand: '{}'. Expected 'self.field', hex, or integer literal.", operand
-        )))
+        Ok((lhs, idx))
     }
     
-    // Helper to find operator composed of punctuation, ignoring parentheses
-fn find_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
-    let mut depth = 0;
-    let bytes = expr.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'(' => depth += 1,
-            b')' => depth -= 1,
-            _ => {
-                if depth == 0 {
-                    if expr[i..].starts_with(op) {
-                         return Some(i);
-                    }
-                }
-            }
+    fn parse_atom(tokens: &[Token]) -> Result<(ExprKind, usize), ProofError> {
+         if tokens.is_empty() {
+             return Err(ProofError::ParseError("Unexpected end of expression".to_string()));
+         }
+         
+         match &tokens[0] {
+             Token::LParen => {
+                 let (expr, consumed) = Self::parse_expression_climbing(&tokens[1..], 0)?;
+                 if tokens.len() <= 1 + consumed || tokens[1 + consumed] != Token::RParen {
+                      return Err(ProofError::ParseError("Mismatched parentheses".to_string()));
+                 }
+                 Ok((expr, 1 + consumed + 1))
+             }
+             Token::Literal(n) => Ok((ExprKind::IntLiteral(*n), 1)),
+             Token::Field(name) => {
+                  if name.starts_with("self.") {
+                       let field_part = &name[5..];
+                       if field_part.is_empty() || !Self::is_valid_identifier(field_part) {
+                            return Err(ProofError::ParseError(format!("Invalid field identifier in '{}'", name)));
+                       }
+                       Ok((ExprKind::FieldAccess { field_name: field_part.to_string() }, 1))
+                  } else {
+                       Err(ProofError::ParseError(format!("Invalid operand '{}'. Expected 'self.field' or literal.", name)))
+                  }
+             },
+             _ => Err(ProofError::ParseError(format!("Unexpected token: {:?}", tokens[0]))),
+         }
+    }
+    
+    fn get_precedence(op: &str) -> u8 {
+        match op {
+            "||" => 1,
+            "&&" => 2,
+            "==" | "!=" | "<" | ">" | "<=" | ">=" => 3,
+            "+" | "-" | "|" | "^" => 4,
+            "*" | "/" | "%" | "&" | "<<" | ">>" => 5,
+             _ => 0,
         }
     }
-    None
-}
+    
+    fn combine_expr(lhs: ExprKind, op: &str, rhs: ExprKind) -> Result<ExprKind, ProofError> {
+         // Relational
+         if let Some(cmp) = ComparisonOp::from_str(op) {
+             return Ok(ExprKind::BinaryOp { left: Box::new(lhs), op: cmp, right: Box::new(rhs) });
+         }
+         
+         // Arithmetic
+         let arith = match op {
+             "+" => Some(ArithmeticOp::Add),
+             "-" => Some(ArithmeticOp::Sub),
+             "*" => Some(ArithmeticOp::Mul),
+             "/" => Some(ArithmeticOp::Div),
+             "%" => Some(ArithmeticOp::Rem),
+             _ => None,
+         };
+         if let Some(aop) = arith {
+             return Ok(ExprKind::ArithmeticOp { left: Box::new(lhs), op: aop, right: Box::new(rhs) });
+         }
+         
+         // Bitwise
+         let bit = match op {
+             "&" => Some(BitwiseOp::And),
+             "|" => Some(BitwiseOp::Or),
+             "^" => Some(BitwiseOp::Xor),
+             "<<" => Some(BitwiseOp::Shl),
+             ">>" => Some(BitwiseOp::Shr),
+             _ => None,
+         };
+         if let Some(bop) = bit {
+             return Ok(ExprKind::BitwiseOp { left: Box::new(lhs), op: bop, right: Box::new(rhs) });
+         }
+         
+         // Logical
+         match op {
+              "&&" => Ok(ExprKind::And(vec![lhs, rhs])), // Simplified binary tree for And
+              "||" => Ok(ExprKind::Or(vec![lhs, rhs])),
+              _ => Err(ProofError::ParseError(format!("Unknown operator: {}", op))),
+         }
+    }
 
-fn find_last_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
-    let mut depth = 0;
-    let bytes = expr.as_bytes();
-    // Scan backwards
-    let mut i = bytes.len();
-    while i > 0 {
-        i -= 1;
-        let b = bytes[i];
-         match b {
-            b')' => depth += 1,
-            b'(' => depth -= 1,
-            _ => {
-                if depth == 0 {
-                     // Check if op starts here
-                     if expr[i..].starts_with(op) {
-                         // For - and +, check if this is a binary op (preceded by a value-like token)
-                         // not a unary op (preceded by another operator or start of expr)
-                         if op == "-" || op == "+" {
-                             if i == 0 {
-                                 // At start of expression, it's unary
-                                 continue;
-                             }
-                             let prev_char = bytes[i - 1];
-                             // If preceded by ), digit, or alphanumeric (end of identifier), it's binary
-                             // If preceded by operator chars or space after operator, it's unary
-                             if prev_char == b')' || prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
-                                 return Some(i);
-                             }
-                             // Otherwise skip this - it's likely unary
-                             continue;
-                         }
-                         return Some(i);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-    
+
+
+
+
+
+
     /// Validates that a string is a valid Rust identifier.
     pub fn is_valid_identifier(s: &str) -> bool {
         if s.is_empty() {
@@ -504,6 +418,7 @@ fn find_last_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
             return Self::parse(exprs[0]);
         }
         
+        // Fix: Use generic iteration to allow collect into Result<Vec<_>, _>
         let parsed: Result<Vec<_>, _> = exprs.iter().map(|e| Self::parse(e)).collect();
         Ok(ExprKind::And(parsed?))
     }
@@ -526,6 +441,113 @@ pub trait FieldValueProvider<'ctx> {
 // ============================================================================
 // Z3-specific implementations (only when z3-backend feature is enabled)
 // ============================================================================
+
+
+#[derive(Debug, PartialEq, Clone)]
+enum Token {
+    Literal(i64),
+    Field(String),
+    Op(String),
+    LParen,
+    RParen,
+}
+
+struct Tokenizer;
+
+impl Tokenizer {
+     fn tokenize(input: &str) -> Result<Vec<Token>, ProofError> {
+         let mut tokens = Vec::new();
+         let mut chars = input.chars().peekable();
+         
+         while let Some(&c) = chars.peek() {
+             if c.is_whitespace() {
+                 chars.next();
+             } else if c == '(' {
+                 tokens.push(Token::LParen);
+                 chars.next();
+             } else if c == ')' {
+                 tokens.push(Token::RParen);
+                 chars.next();
+             } else if c.is_digit(10) || c == '-' {
+                 if c == '-' {
+                      let mut temp_iter = chars.clone();
+                      temp_iter.next();
+                      match temp_iter.peek() {
+                           Some(&next_c) if next_c.is_digit(10) => {}, // is number
+                           _ => {
+                                tokens.push(Token::Op("-".to_string()));
+                                chars.next();
+                                continue;
+                           }
+                      }
+                 }
+                 
+                 let mut num_str = String::new();
+                 if c == '-' {
+                      num_str.push(c);
+                      chars.next();
+                 }
+                 
+                 if chars.peek() == Some(&'0') {
+                      let mut lookahead = chars.clone();
+                      lookahead.next();
+                      if let Some(&x) = lookahead.peek() {
+                           if x == 'x' || x == 'X' {
+                                chars.next(); chars.next(); // 0x
+                                let mut hex_val = String::new();
+                                while let Some(&hc) = chars.peek() {
+                                     if hc.is_digit(16) {
+                                          hex_val.push(hc);
+                                          chars.next();
+                                     } else { break; }
+                                }
+                                let val = i64::from_str_radix(&hex_val, 16)
+                                     .map_err(|_| ProofError::ParseError("Invalid hex literal".to_string()))?;
+                                tokens.push(Token::Literal(val));
+                                continue;
+                           }
+                      }
+                 }
+                 
+                 while let Some(&d) = chars.peek() {
+                      if d.is_digit(10) {
+                           num_str.push(d);
+                           chars.next();
+                      } else { break; }
+                 }
+                 let val = num_str.parse::<i64>().map_err(|_| ProofError::ParseError("Invalid integer".to_string()))?;
+                 tokens.push(Token::Literal(val));
+                 
+             } else if Self::is_start_of_identifier(c) {
+                  let mut ident = String::new();
+                  while let Some(&ic) = chars.peek() {
+                       if ic.is_alphanumeric() || ic == '_' || ic == '.' {
+                            ident.push(ic);
+                            chars.next();
+                       } else { break; }
+                  }
+                  tokens.push(Token::Field(ident));
+             } else {
+                  let mut op = String::new();
+                  op.push(chars.next().unwrap());
+                  
+                  if let Some(&nc) = chars.peek() {
+                       let two_char = format!("{}{}", op, nc);
+                       if ["==", "!=", ">=", "<=", "<<", ">>", "||", "&&"].contains(&two_char.as_str()) {
+                            op = two_char;
+                            chars.next();
+                       }
+                  }
+                  tokens.push(Token::Op(op));
+             }
+         }
+         Ok(tokens)
+     }
+     
+     fn is_start_of_identifier(c: char) -> bool {
+         c.is_alphabetic() || c == '_'
+     }
+}
 
 #[cfg(feature = "z3-backend")]
 mod z3_impl {
@@ -771,5 +793,26 @@ mod tests {
         assert_eq!(ComparisonOp::from_str(">="), Some(ComparisonOp::Ge));
         assert_eq!(ComparisonOp::from_str("<="), Some(ComparisonOp::Le));
         assert_eq!(ComparisonOp::from_str("???"), None);
+    }
+
+    #[test]
+    fn test_precedence_arithmetic() {
+        // self.x + 2 > 5
+        // Arithmetic (prec 4) should bind tighter than Comparison (prec 3)
+        let result = ExpressionParser::parse("self.x + 2 > 5").unwrap();
+        match result {
+             ExprKind::BinaryOp { left, op, right } => {
+                  assert_eq!(op, ComparisonOp::Gt);
+                  assert!(matches!(*right, ExprKind::IntLiteral(5)));
+                  
+                  match *left {
+                      ExprKind::ArithmeticOp { left: _l2, op: op2, right: _r2 } => {
+                           assert_eq!(op2, ArithmeticOp::Add);
+                      }
+                      _ => panic!("Expected ArithmeticOp on LHS"),
+                  }
+             }
+             _ => panic!("Expected BinaryOp"),
+        }
     }
 }
