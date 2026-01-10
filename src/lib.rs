@@ -300,7 +300,7 @@ mod z3_backend {
             }
             
             let refs: Vec<&_> = bools.iter().collect();
-            self.check_assertions(&refs)
+            self.check_assertions(refs)
         }
     }
 }

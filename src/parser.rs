@@ -556,15 +556,14 @@ mod z3_impl {
     use crate::{Context, ast};
 
     /// Visitor that generates Z3 AST from parsed expressions.
-    pub struct Z3AstGenerator<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> {
-        ctx: &'ctx Context,
+    pub struct Z3AstGenerator<'prov, P: FieldValueProvider + ?Sized> {
         provider: &'prov P,
     }
 
-    impl<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> Z3AstGenerator<'ctx, 'prov, P> {
+    impl<'prov, P: FieldValueProvider + ?Sized> Z3AstGenerator<'prov, P> {
         /// Creates a new Z3 AST generator.
-        pub fn new(ctx: &'ctx Context, provider: &'prov P) -> Self {
-            Self { ctx, provider }
+        pub fn new(provider: &'prov P) -> Self {
+            Self { provider }
         }
         
         /// Generates a Z3 boolean assertion from an expression.
@@ -596,7 +595,7 @@ mod z3_impl {
         }
     }
 
-    impl<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> ExprVisitor for Z3AstGenerator<'ctx, 'prov, P> {
+    impl<'prov, P: FieldValueProvider + ?Sized> ExprVisitor for Z3AstGenerator<'prov, P> {
         type Output = Result<ast::Bool, ProofError>;
         
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
