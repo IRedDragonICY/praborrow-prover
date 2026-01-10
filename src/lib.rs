@@ -39,31 +39,30 @@ pub mod parser;
 
 extern crate alloc;
 
-
-#[cfg(feature = "std")]
-use std::sync::Mutex;
 #[cfg(feature = "std")]
 use lru::LruCache;
 #[cfg(feature = "std")]
 use std::num::NonZeroUsize;
+#[cfg(feature = "std")]
+use std::sync::Mutex;
 
+use alloc::string::String;
+use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use lazy_static::lazy_static;
 #[cfg(feature = "std")]
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
-use alloc::string::String;
-use alloc::vec::Vec;
 
 // ... (skipping Z3 imports which remain the same) ...
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
-pub use z3::{Config, Context, Solver, SatResult};
+pub use z3::{Config, Context, SatResult, Solver};
 
 // Re-export Z3 types when available
 #[cfg(feature = "z3-backend")]
-pub use z3::{ast, Sort};
+pub use z3::{Sort, ast};
 
 // Stub Z3 types when backend is disabled
 #[cfg(not(feature = "z3-backend"))]
@@ -81,17 +80,20 @@ pub mod z3_stub {
         pub trait Ast<'ctx> {}
         impl<'ctx> Ast<'ctx> for Int<'ctx> {}
         impl<'ctx> Ast<'ctx> for Bool<'ctx> {}
-        
+
         impl<'ctx> Int<'ctx> {
-            pub fn from_i64(_ctx: &super::Context, _v: i64) -> Self { Self(PhantomData) }
-            pub fn from_u64(_ctx: &super::Context, _v: u64) -> Self { Self(PhantomData) }
+            pub fn from_i64(_ctx: &super::Context, _v: i64) -> Self {
+                Self(PhantomData)
+            }
+            pub fn from_u64(_ctx: &super::Context, _v: u64) -> Self {
+                Self(PhantomData)
+            }
         }
     }
 }
 
 #[cfg(not(feature = "z3-backend"))]
 pub use z3_stub::{Context, ast};
-
 
 /// Errors that can occur during formal verification.
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -237,7 +239,7 @@ lazy_static! {
 #[cfg(feature = "z3-backend")]
 mod z3_backend {
     use super::*;
-    
+
     /// Manages the Z3 solver context and configuration.
     ///
     /// # Thread Safety
@@ -263,7 +265,10 @@ mod z3_backend {
         }
 
         /// Checks if assertions are satisfiable using a fresh solver.
-        pub fn check_assertions<'a, I>(&'a self, assertions: I) -> Result<VerificationToken, ProofError>
+        pub fn check_assertions<'a, I>(
+            &'a self,
+            assertions: I,
+        ) -> Result<VerificationToken, ProofError>
         where
             I: IntoIterator<Item = &'a z3::ast::Bool>,
         {
@@ -271,18 +276,22 @@ mod z3_backend {
             for assertion in assertions {
                 solver.assert(assertion);
             }
-            
+
             match solver.check() {
                 SatResult::Sat => Ok(VerificationToken::new()),
                 SatResult::Unsat => Err(ProofError::InvariantViolated(
-                    "Solver proved invariant cannot be satisfied".to_string()
+                    "Solver proved invariant cannot be satisfied".to_string(),
                 )),
                 SatResult::Unknown => Err(ProofError::Unknown),
             }
         }
 
         /// Verifies a set of invariants using the provided field provider.
-        pub fn verify_invariants<P>(&self, provider: &P, invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        pub fn verify_invariants<P>(
+            &self,
+            provider: &P,
+            invariants: &[&str],
+        ) -> Result<VerificationToken, ProofError>
         where
             P: crate::parser::FieldValueProvider + ?Sized,
         {
@@ -291,14 +300,14 @@ mod z3_backend {
             // Actually Z3AstGenerator generates 'ctx Bools.
             // We need to collect them.
             let mut bools = Vec::new();
-            
+
             for inv in invariants {
                 let expr = ExpressionParser::parse(inv)?;
                 let mut generator = Z3AstGenerator::new(provider);
                 let assertion = generator.generate(&expr)?;
                 bools.push(assertion);
             }
-            
+
             let refs: Vec<&_> = bools.iter().collect();
             self.check_assertions(refs)
         }
@@ -363,7 +372,11 @@ mod stub_backend {
             Ok(VerificationToken::new())
         }
 
-        pub fn verify_invariants<P>(&self, _provider: &P, _invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        pub fn verify_invariants<P>(
+            &self,
+            _provider: &P,
+            _invariants: &[&str],
+        ) -> Result<VerificationToken, ProofError>
         where
             P: crate::parser::FieldValueProvider + ?Sized,
         {
@@ -403,7 +416,7 @@ pub trait ProveInvariant {
     /// Verifies all invariants.
     ///
     /// # With `z3-backend` feature
-    /// 
+    ///
     /// Uses Z3 SMT solver for mathematical proof.
     ///
     /// # Without `z3-backend` feature
@@ -417,10 +430,7 @@ pub trait ProveInvariant {
     /// Verifies invariants using a specific SMT context.
     ///
     /// This allows reusing the context for efficiency or custom configuration.
-    fn verify_with_context(
-        &self,
-        ctx: &SmtContext,
-    ) -> Result<VerificationToken, ProofError>;
+    fn verify_with_context(&self, ctx: &SmtContext) -> Result<VerificationToken, ProofError>;
 
     /// Verifies invariants with caching.
     ///
@@ -435,13 +445,13 @@ pub trait ProveInvariant {
             let type_name = std::any::type_name::<Self>();
             let data_hash = self.compute_data_hash();
             let invariants = Self::invariant_expressions();
-            
+
             let cache_key = VerificationCache::compute_key(type_name, &data_hash, invariants);
-            
+
             match GLOBAL_CACHE.lookup(&cache_key) {
                 CacheResult::Hit => Ok(VerificationToken::new()),
                 CacheResult::Failed => Err(ProofError::InvariantViolated(
-                    "Cached: invariant previously failed".to_string()
+                    "Cached: invariant previously failed".to_string(),
                 )),
                 CacheResult::Miss => {
                     let result = self.verify();
@@ -510,12 +520,9 @@ mod z3_impls {
 }
 
 #[cfg(feature = "z3-backend")]
-
-
 // ============================================================================
 // Tests
 // ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,16 +537,16 @@ mod tests {
     fn test_cache_operations() {
         let cache = VerificationCache::new();
         let key = [0u8; 32];
-        
+
         assert_eq!(cache.lookup(&key), CacheResult::Miss);
-        
+
         cache.store(key, true);
         assert_eq!(cache.lookup(&key), CacheResult::Hit);
-        
+
         let key2 = [1u8; 32];
         cache.store(key2, false);
         assert_eq!(cache.lookup(&key2), CacheResult::Failed);
-        
+
         cache.clear();
         assert_eq!(cache.lookup(&key), CacheResult::Miss);
     }
@@ -550,7 +557,7 @@ mod tests {
         let key1 = VerificationCache::compute_key("MyType", &[1, 2, 3], &["x > 0"]);
         let key2 = VerificationCache::compute_key("MyType", &[1, 2, 3], &["x > 0"]);
         let key3 = VerificationCache::compute_key("MyType", &[1, 2, 4], &["x > 0"]);
-        
+
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
     }
@@ -565,7 +572,7 @@ mod tests {
     fn test_proof_error_display() {
         let e = ProofError::SolverFailure("test".to_string());
         assert!(e.to_string().contains("test"));
-        
+
         let e = ProofError::InvariantViolated("inv".to_string());
         assert!(e.to_string().contains("inv"));
     }

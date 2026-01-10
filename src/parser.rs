@@ -20,27 +20,27 @@
 //! 3. Add parsing logic in `ExpressionParser::parse_*`
 
 use crate::ProofError;
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use alloc::vec;
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// Represents a parsed expression node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     /// An integer literal value.
     IntLiteral(i64),
-    
+
     /// An unsigned integer literal.
     UIntLiteral(u64),
-    
+
     /// A field access expression (e.g., `self.balance`).
     FieldAccess {
         /// The field name (without `self.` prefix).
         field_name: String,
     },
-    
+
     /// A bitwise operation.
     BitwiseOp {
         left: Box<ExprKind>,
@@ -61,13 +61,13 @@ pub enum ExprKind {
         op: ComparisonOp,
         right: Box<ExprKind>,
     },
-    
+
     /// A logical AND of multiple expressions.
     And(Vec<ExprKind>),
-    
+
     /// A logical OR of multiple expressions.
     Or(Vec<ExprKind>),
-    
+
     /// Logical NOT.
     Not(Box<ExprKind>),
 }
@@ -111,6 +111,7 @@ pub enum ComparisonOp {
 
 impl ComparisonOp {
     /// Parses a comparison operator from a string slice.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim() {
             ">=" => Some(ComparisonOp::Ge),
@@ -122,7 +123,7 @@ impl ComparisonOp {
             _ => None,
         }
     }
-    
+
     /// Returns the operator as a string.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -143,16 +144,16 @@ impl ComparisonOp {
 pub trait ExprVisitor {
     /// The output type of visiting an expression.
     type Output;
-    
+
     /// Visit an integer literal.
     fn visit_int_literal(&mut self, value: i64) -> Self::Output;
-    
+
     /// Visit an unsigned integer literal.
     fn visit_uint_literal(&mut self, value: u64) -> Self::Output;
-    
+
     /// Visit a field access.
     fn visit_field_access(&mut self, field_name: &str) -> Self::Output;
-    
+
     /// Visit a bitwise operation.
     fn visit_bitwise_op(
         &mut self,
@@ -176,16 +177,16 @@ pub trait ExprVisitor {
         op: ComparisonOp,
         right: &ExprKind,
     ) -> Self::Output;
-    
+
     /// Visit a logical AND.
     fn visit_and(&mut self, exprs: &[ExprKind]) -> Self::Output;
-    
+
     /// Visit a logical OR.
     fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output;
-    
+
     /// Visit a logical NOT.
     fn visit_not(&mut self, expr: &ExprKind) -> Self::Output;
-    
+
     /// Dispatch to the appropriate visit method.
     fn visit(&mut self, expr: &ExprKind) -> Self::Output {
         match expr {
@@ -193,7 +194,9 @@ pub trait ExprVisitor {
             ExprKind::UIntLiteral(v) => self.visit_uint_literal(*v),
             ExprKind::FieldAccess { field_name } => self.visit_field_access(field_name),
             ExprKind::BitwiseOp { left, op, right } => self.visit_bitwise_op(left, *op, right),
-            ExprKind::ArithmeticOp { left, op, right } => self.visit_arithmetic_op(left, *op, right),
+            ExprKind::ArithmeticOp { left, op, right } => {
+                self.visit_arithmetic_op(left, *op, right)
+            }
             ExprKind::BinaryOp { left, op, right } => self.visit_binary_op(left, *op, right),
             ExprKind::And(exprs) => self.visit_and(exprs),
             ExprKind::Or(exprs) => self.visit_or(exprs),
@@ -229,34 +232,36 @@ impl ExpressionParser {
     /// ```
     pub fn parse(expr: &str) -> Result<ExprKind, ProofError> {
         let expr = expr.trim();
-        
+
         if expr.is_empty() {
             return Err(ProofError::ParseError("Empty expression".to_string()));
         }
-        
+
         // Try to parse as a comparison expression
         let result = Self::parse_comparison(expr)?;
-        
+
         // Validate that the result is a comparison/logical expression, not just an operand
         // This ensures invariants like "self.balance" (missing operator) are rejected
         match &result {
-            ExprKind::BinaryOp { .. } |
-            ExprKind::And(_) |
-            ExprKind::Or(_) |
-            ExprKind::Not(_) => Ok(result),
-            ExprKind::FieldAccess { .. } |
-            ExprKind::IntLiteral(_) |
-            ExprKind::UIntLiteral(_) => Err(ProofError::ParseError(
-                "Expression must be a comparison (e.g., 'self.x > 0'), not just a value".to_string()
-            )),
+            ExprKind::BinaryOp { .. } | ExprKind::And(_) | ExprKind::Or(_) | ExprKind::Not(_) => {
+                Ok(result)
+            }
+            ExprKind::FieldAccess { .. } | ExprKind::IntLiteral(_) | ExprKind::UIntLiteral(_) => {
+                Err(ProofError::ParseError(
+                    "Expression must be a comparison (e.g., 'self.x > 0'), not just a value"
+                        .to_string(),
+                ))
+            }
             // Allow arithmetic/bitwise as they may be part of larger expressions
-            ExprKind::ArithmeticOp { .. } |
-            ExprKind::BitwiseOp { .. } => Err(ProofError::ParseError(
-                "Expression must be a comparison (e.g., 'self.x > 0'), not just arithmetic".to_string()
-            )),
+            ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => {
+                Err(ProofError::ParseError(
+                    "Expression must be a comparison (e.g., 'self.x > 0'), not just arithmetic"
+                        .to_string(),
+                ))
+            }
         }
     }
-    
+
     /// Parses a comparison expression using precedence climbing.
     fn parse_comparison(expr: &str) -> Result<ExprKind, ProofError> {
         let tokens = Tokenizer::tokenize(expr)?;
@@ -265,9 +270,14 @@ impl ExpressionParser {
     }
 
     /// Precedence climbing parser.
-    fn parse_expression_climbing(tokens: &[Token], min_precedence: u8) -> Result<(ExprKind, usize), ProofError> {
+    fn parse_expression_climbing(
+        tokens: &[Token],
+        min_precedence: u8,
+    ) -> Result<(ExprKind, usize), ProofError> {
         if tokens.is_empty() {
-             return Err(ProofError::ParseError("Unexpected end of expression".to_string()));
+            return Err(ProofError::ParseError(
+                "Unexpected end of expression".to_string(),
+            ));
         }
 
         // 1. Parse LHS (atom)
@@ -275,64 +285,81 @@ impl ExpressionParser {
 
         // 2. Loop while next token is operator with precedence >= min_precedence
         while idx < tokens.len() {
-             let token = &tokens[idx];
-             
-             if let Token::Op(op_str) = token {
-                 let precedence = Self::get_precedence(op_str);
-                 if precedence < min_precedence {
-                     break;
-                 }
-                 
-                 let op_str = op_str.clone();
-                 idx += 1; // consume operator
-                 
-                 // 3. Parse RHS with higher precedence
-                 // Right-associativity -> min_precedence = precedence
-                 // Left-associativity -> min_precedence = precedence + 1
-                 // We'll use left-associativity for most standard ops
-                 let next_min_precedence = precedence + 1;
-                 
-                 let (rhs, rhs_consumed) = Self::parse_expression_climbing(&tokens[idx..], next_min_precedence)?;
-                 idx += rhs_consumed;
-                 
-                 lhs = Self::combine_expr(lhs, &op_str, rhs)?;
-             } else {
-                 break;
-             }
+            let token = &tokens[idx];
+
+            if let Token::Op(op_str) = token {
+                let precedence = Self::get_precedence(op_str);
+                if precedence < min_precedence {
+                    break;
+                }
+
+                let op_str = op_str.clone();
+                idx += 1; // consume operator
+
+                // 3. Parse RHS with higher precedence
+                // Right-associativity -> min_precedence = precedence
+                // Left-associativity -> min_precedence = precedence + 1
+                // We'll use left-associativity for most standard ops
+                let next_min_precedence = precedence + 1;
+
+                let (rhs, rhs_consumed) =
+                    Self::parse_expression_climbing(&tokens[idx..], next_min_precedence)?;
+                idx += rhs_consumed;
+
+                lhs = Self::combine_expr(lhs, &op_str, rhs)?;
+            } else {
+                break;
+            }
         }
-        
+
         Ok((lhs, idx))
     }
-    
+
     fn parse_atom(tokens: &[Token]) -> Result<(ExprKind, usize), ProofError> {
-         if tokens.is_empty() {
-             return Err(ProofError::ParseError("Unexpected end of expression".to_string()));
-         }
-         
-         match &tokens[0] {
-             Token::LParen => {
-                 let (expr, consumed) = Self::parse_expression_climbing(&tokens[1..], 0)?;
-                 if tokens.len() <= 1 + consumed || tokens[1 + consumed] != Token::RParen {
-                      return Err(ProofError::ParseError("Mismatched parentheses".to_string()));
-                 }
-                 Ok((expr, 1 + consumed + 1))
-             }
-             Token::Literal(n) => Ok((ExprKind::IntLiteral(*n), 1)),
-             Token::Field(name) => {
-                  if name.starts_with("self.") {
-                       let field_part = &name[5..];
-                       if field_part.is_empty() || !Self::is_valid_identifier(field_part) {
-                            return Err(ProofError::ParseError(format!("Invalid field identifier in '{}'", name)));
-                       }
-                       Ok((ExprKind::FieldAccess { field_name: field_part.to_string() }, 1))
-                  } else {
-                       Err(ProofError::ParseError(format!("Invalid operand '{}'. Expected 'self.field' or literal.", name)))
-                  }
-             },
-             _ => Err(ProofError::ParseError(format!("Unexpected token: {:?}", tokens[0]))),
-         }
+        if tokens.is_empty() {
+            return Err(ProofError::ParseError(
+                "Unexpected end of expression".to_string(),
+            ));
+        }
+
+        match &tokens[0] {
+            Token::LParen => {
+                let (expr, consumed) = Self::parse_expression_climbing(&tokens[1..], 0)?;
+                if tokens.len() <= 1 + consumed || tokens[1 + consumed] != Token::RParen {
+                    return Err(ProofError::ParseError("Mismatched parentheses".to_string()));
+                }
+                Ok((expr, 1 + consumed + 1))
+            }
+            Token::Literal(n) => Ok((ExprKind::IntLiteral(*n), 1)),
+            Token::Field(name) => {
+                if let Some(field_part) = name.strip_prefix("self.") {
+                    let field_part = &field_part;
+                    if field_part.is_empty() || !Self::is_valid_identifier(field_part) {
+                        return Err(ProofError::ParseError(format!(
+                            "Invalid field identifier in '{}'",
+                            name
+                        )));
+                    }
+                    Ok((
+                        ExprKind::FieldAccess {
+                            field_name: field_part.to_string(),
+                        },
+                        1,
+                    ))
+                } else {
+                    Err(ProofError::ParseError(format!(
+                        "Invalid operand '{}'. Expected 'self.field' or literal.",
+                        name
+                    )))
+                }
+            }
+            _ => Err(ProofError::ParseError(format!(
+                "Unexpected token: {:?}",
+                tokens[0]
+            ))),
+        }
     }
-    
+
     fn get_precedence(op: &str) -> u8 {
         match op {
             "||" => 1,
@@ -340,84 +367,92 @@ impl ExpressionParser {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => 3,
             "+" | "-" | "|" | "^" => 4,
             "*" | "/" | "%" | "&" | "<<" | ">>" => 5,
-             _ => 0,
+            _ => 0,
         }
     }
-    
+
     fn combine_expr(lhs: ExprKind, op: &str, rhs: ExprKind) -> Result<ExprKind, ProofError> {
-         // Relational
-         if let Some(cmp) = ComparisonOp::from_str(op) {
-             return Ok(ExprKind::BinaryOp { left: Box::new(lhs), op: cmp, right: Box::new(rhs) });
-         }
-         
-         // Arithmetic
-         let arith = match op {
-             "+" => Some(ArithmeticOp::Add),
-             "-" => Some(ArithmeticOp::Sub),
-             "*" => Some(ArithmeticOp::Mul),
-             "/" => Some(ArithmeticOp::Div),
-             "%" => Some(ArithmeticOp::Rem),
-             _ => None,
-         };
-         if let Some(aop) = arith {
-             return Ok(ExprKind::ArithmeticOp { left: Box::new(lhs), op: aop, right: Box::new(rhs) });
-         }
-         
-         // Bitwise
-         let bit = match op {
-             "&" => Some(BitwiseOp::And),
-             "|" => Some(BitwiseOp::Or),
-             "^" => Some(BitwiseOp::Xor),
-             "<<" => Some(BitwiseOp::Shl),
-             ">>" => Some(BitwiseOp::Shr),
-             _ => None,
-         };
-         if let Some(bop) = bit {
-             return Ok(ExprKind::BitwiseOp { left: Box::new(lhs), op: bop, right: Box::new(rhs) });
-         }
-         
-         // Logical
-         match op {
-              "&&" => Ok(ExprKind::And(vec![lhs, rhs])), // Simplified binary tree for And
-              "||" => Ok(ExprKind::Or(vec![lhs, rhs])),
-              _ => Err(ProofError::ParseError(format!("Unknown operator: {}", op))),
-         }
+        // Relational
+        if let Some(cmp) = ComparisonOp::from_str(op) {
+            return Ok(ExprKind::BinaryOp {
+                left: Box::new(lhs),
+                op: cmp,
+                right: Box::new(rhs),
+            });
+        }
+
+        // Arithmetic
+        let arith = match op {
+            "+" => Some(ArithmeticOp::Add),
+            "-" => Some(ArithmeticOp::Sub),
+            "*" => Some(ArithmeticOp::Mul),
+            "/" => Some(ArithmeticOp::Div),
+            "%" => Some(ArithmeticOp::Rem),
+            _ => None,
+        };
+        if let Some(aop) = arith {
+            return Ok(ExprKind::ArithmeticOp {
+                left: Box::new(lhs),
+                op: aop,
+                right: Box::new(rhs),
+            });
+        }
+
+        // Bitwise
+        let bit = match op {
+            "&" => Some(BitwiseOp::And),
+            "|" => Some(BitwiseOp::Or),
+            "^" => Some(BitwiseOp::Xor),
+            "<<" => Some(BitwiseOp::Shl),
+            ">>" => Some(BitwiseOp::Shr),
+            _ => None,
+        };
+        if let Some(bop) = bit {
+            return Ok(ExprKind::BitwiseOp {
+                left: Box::new(lhs),
+                op: bop,
+                right: Box::new(rhs),
+            });
+        }
+
+        // Logical
+        match op {
+            "&&" => Ok(ExprKind::And(vec![lhs, rhs])), // Simplified binary tree for And
+            "||" => Ok(ExprKind::Or(vec![lhs, rhs])),
+            _ => Err(ProofError::ParseError(format!("Unknown operator: {}", op))),
+        }
     }
-
-
-
-
-
-
 
     /// Validates that a string is a valid Rust identifier.
     pub fn is_valid_identifier(s: &str) -> bool {
         if s.is_empty() {
             return false;
         }
-        
+
         let mut chars = s.chars();
-        
+
         // First character must be letter or underscore
         match chars.next() {
             Some(c) if c.is_alphabetic() || c == '_' => {}
             _ => return false,
         }
-        
+
         // Rest must be alphanumeric or underscore
         chars.all(|c| c.is_alphanumeric() || c == '_')
     }
-    
+
     /// Parses multiple invariant expressions and combines them with AND.
     pub fn parse_all(exprs: &[&str]) -> Result<ExprKind, ProofError> {
         if exprs.is_empty() {
-            return Err(ProofError::ParseError("No expressions provided".to_string()));
+            return Err(ProofError::ParseError(
+                "No expressions provided".to_string(),
+            ));
         }
-        
+
         if exprs.len() == 1 {
             return Self::parse(exprs[0]);
         }
-        
+
         // Fix: Use generic iteration to allow collect into Result<Vec<_>, _>
         let parsed: Result<Vec<_>, _> = exprs.iter().map(|e| Self::parse(e)).collect();
         Ok(ExprKind::And(parsed?))
@@ -435,13 +470,12 @@ use crate::ast;
 /// This trait is implemented by generated code to map field names to Z3 AST nodes.
 pub trait FieldValueProvider {
     /// Returns the Z3 AST for a field, or an error if the field doesn't exist.
-    fn get_field_z3(&self, field_name: &str) -> Result<ast::Int, ProofError>;
+    fn get_field_z3(&self, field_name: &str) -> Result<ast::Int<'_>, ProofError>;
 }
 
 // ============================================================================
 // Z3-specific implementations (only when z3-backend feature is enabled)
 // ============================================================================
-
 
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
@@ -455,98 +489,109 @@ enum Token {
 struct Tokenizer;
 
 impl Tokenizer {
-     fn tokenize(input: &str) -> Result<Vec<Token>, ProofError> {
-         let mut tokens = Vec::new();
-         let mut chars = input.chars().peekable();
-         
-         while let Some(&c) = chars.peek() {
-             if c.is_whitespace() {
-                 chars.next();
-             } else if c == '(' {
-                 tokens.push(Token::LParen);
-                 chars.next();
-             } else if c == ')' {
-                 tokens.push(Token::RParen);
-                 chars.next();
-             } else if c.is_digit(10) || c == '-' {
-                 if c == '-' {
-                      let mut temp_iter = chars.clone();
-                      temp_iter.next();
-                      match temp_iter.peek() {
-                           Some(&next_c) if next_c.is_digit(10) => {}, // is number
-                           _ => {
-                                tokens.push(Token::Op("-".to_string()));
-                                chars.next();
-                                continue;
-                           }
-                      }
-                 }
-                 
-                 let mut num_str = String::new();
-                 if c == '-' {
-                      num_str.push(c);
-                      chars.next();
-                 }
-                 
-                 if chars.peek() == Some(&'0') {
-                      let mut lookahead = chars.clone();
-                      lookahead.next();
-                      if let Some(&x) = lookahead.peek() {
-                           if x == 'x' || x == 'X' {
-                                chars.next(); chars.next(); // 0x
-                                let mut hex_val = String::new();
-                                while let Some(&hc) = chars.peek() {
-                                     if hc.is_digit(16) {
-                                          hex_val.push(hc);
-                                          chars.next();
-                                     } else { break; }
+    fn tokenize(input: &str) -> Result<Vec<Token>, ProofError> {
+        let mut tokens = Vec::new();
+        let mut chars = input.chars().peekable();
+
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+            } else if c == '(' {
+                tokens.push(Token::LParen);
+                chars.next();
+            } else if c == ')' {
+                tokens.push(Token::RParen);
+                chars.next();
+            } else if c.is_ascii_digit() || c == '-' {
+                if c == '-' {
+                    let mut temp_iter = chars.clone();
+                    temp_iter.next();
+                    match temp_iter.peek() {
+                        Some(&next_c) if next_c.is_ascii_digit() => {} // is number
+                        _ => {
+                            tokens.push(Token::Op("-".to_string()));
+                            chars.next();
+                            continue;
+                        }
+                    }
+                }
+
+                let mut num_str = String::new();
+                if c == '-' {
+                    num_str.push(c);
+                    chars.next();
+                }
+
+                if chars.peek() == Some(&'0') {
+                    let mut lookahead = chars.clone();
+                    lookahead.next();
+                    #[allow(clippy::collapsible_if)]
+                    if let Some(&x) = lookahead.peek() {
+                        if x == 'x' || x == 'X' {
+                            chars.next();
+                            chars.next(); // 0x
+                            let mut hex_val = String::new();
+                            while let Some(&hc) = chars.peek() {
+                                if hc.is_ascii_hexdigit() {
+                                    hex_val.push(hc);
+                                    chars.next();
+                                } else {
+                                    break;
                                 }
-                                let val = i64::from_str_radix(&hex_val, 16)
-                                     .map_err(|_| ProofError::ParseError("Invalid hex literal".to_string()))?;
-                                tokens.push(Token::Literal(val));
-                                continue;
-                           }
-                      }
-                 }
-                 
-                 while let Some(&d) = chars.peek() {
-                      if d.is_digit(10) {
-                           num_str.push(d);
-                           chars.next();
-                      } else { break; }
-                 }
-                 let val = num_str.parse::<i64>().map_err(|_| ProofError::ParseError("Invalid integer".to_string()))?;
-                 tokens.push(Token::Literal(val));
-                 
-             } else if Self::is_start_of_identifier(c) {
-                  let mut ident = String::new();
-                  while let Some(&ic) = chars.peek() {
-                       if ic.is_alphanumeric() || ic == '_' || ic == '.' {
-                            ident.push(ic);
-                            chars.next();
-                       } else { break; }
-                  }
-                  tokens.push(Token::Field(ident));
-             } else {
-                  let mut op = String::new();
-                  op.push(chars.next().unwrap());
-                  
-                  if let Some(&nc) = chars.peek() {
-                       let two_char = format!("{}{}", op, nc);
-                       if ["==", "!=", ">=", "<=", "<<", ">>", "||", "&&"].contains(&two_char.as_str()) {
-                            op = two_char;
-                            chars.next();
-                       }
-                  }
-                  tokens.push(Token::Op(op));
-             }
-         }
-         Ok(tokens)
-     }
-     
-     fn is_start_of_identifier(c: char) -> bool {
-         c.is_alphabetic() || c == '_'
-     }
+                            }
+                            let val = i64::from_str_radix(&hex_val, 16).map_err(|_| {
+                                ProofError::ParseError("Invalid hex literal".to_string())
+                            })?;
+                            tokens.push(Token::Literal(val));
+                            continue;
+                        }
+                    }
+                }
+
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        num_str.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let val = num_str
+                    .parse::<i64>()
+                    .map_err(|_| ProofError::ParseError("Invalid integer".to_string()))?;
+                tokens.push(Token::Literal(val));
+            } else if Self::is_start_of_identifier(c) {
+                let mut ident = String::new();
+                while let Some(&ic) = chars.peek() {
+                    if ic.is_alphanumeric() || ic == '_' || ic == '.' {
+                        ident.push(ic);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(Token::Field(ident));
+            } else {
+                let mut op = String::new();
+                op.push(chars.next().unwrap());
+
+                if let Some(&nc) = chars.peek() {
+                    let two_char = format!("{}{}", op, nc);
+                    if ["==", "!=", ">=", "<=", "<<", ">>", "||", "&&"].contains(&two_char.as_str())
+                    {
+                        op = two_char;
+                        chars.next();
+                    }
+                }
+                tokens.push(Token::Op(op));
+            }
+        }
+        Ok(tokens)
+    }
+
+    fn is_start_of_identifier(c: char) -> bool {
+        c.is_alphabetic() || c == '_'
+    }
 }
 
 #[cfg(feature = "z3-backend")]
@@ -565,12 +610,12 @@ mod z3_impl {
         pub fn new(provider: &'prov P) -> Self {
             Self { provider }
         }
-        
+
         /// Generates a Z3 boolean assertion from an expression.
         pub fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool, ProofError> {
             self.visit(expr)
         }
-        
+
         /// Helper to get an integer AST from an expression.
         fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
@@ -588,34 +633,35 @@ mod z3_impl {
                         ArithmeticOp::Rem => left_ast.rem(&right_ast),
                     })
                 }
-                _ => Err(ProofError::UnsupportedType(
-                    format!("Expected integer expression, got: {:?}", expr)
-                )),
+                _ => Err(ProofError::UnsupportedType(format!(
+                    "Expected integer expression, got: {:?}",
+                    expr
+                ))),
             }
         }
     }
 
     impl<'prov, P: FieldValueProvider + ?Sized> ExprVisitor for Z3AstGenerator<'prov, P> {
         type Output = Result<ast::Bool, ProofError>;
-        
+
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
             Err(ProofError::ParseError(
-                "Integer literal cannot be used as boolean".to_string()
+                "Integer literal cannot be used as boolean".to_string(),
             ))
         }
-        
+
         fn visit_uint_literal(&mut self, _value: u64) -> Self::Output {
             Err(ProofError::ParseError(
-                "Unsigned integer literal cannot be used as boolean".to_string()
+                "Unsigned integer literal cannot be used as boolean".to_string(),
             ))
         }
-        
+
         fn visit_field_access(&mut self, _field_name: &str) -> Self::Output {
             Err(ProofError::ParseError(
-                "Field access cannot be used as boolean directly".to_string()
+                "Field access cannot be used as boolean directly".to_string(),
             ))
         }
-        
+
         fn visit_binary_op(
             &mut self,
             left: &ExprKind,
@@ -624,7 +670,7 @@ mod z3_impl {
         ) -> Self::Output {
             let left_ast = self.get_int_ast(left)?;
             let right_ast = self.get_int_ast(right)?;
-            
+
             Ok(match op {
                 ComparisonOp::Gt => left_ast.gt(&right_ast),
                 ComparisonOp::Lt => left_ast.lt(&right_ast),
@@ -634,15 +680,17 @@ mod z3_impl {
                 ComparisonOp::Le => left_ast.le(&right_ast),
             })
         }
-        
+
         fn visit_bitwise_op(
             &mut self,
             _left: &ExprKind,
             _op: BitwiseOp,
             _right: &ExprKind,
         ) -> Self::Output {
-             // Z3 Int bitwise ops not supported in this binding context easily
-             Err(ProofError::UnsupportedType("Bitwise operations on Infinite Integers not supported yet.".to_string()))
+            // Z3 Int bitwise ops not supported in this binding context easily
+            Err(ProofError::UnsupportedType(
+                "Bitwise operations on Infinite Integers not supported yet.".to_string(),
+            ))
         }
 
         fn visit_arithmetic_op(
@@ -651,23 +699,25 @@ mod z3_impl {
             _op: ArithmeticOp,
             _right: &ExprKind,
         ) -> Self::Output {
-             Err(ProofError::ParseError("Arithmetic at top-level is not a boolean assertion".to_string()))
+            Err(ProofError::ParseError(
+                "Arithmetic at top-level is not a boolean assertion".to_string(),
+            ))
         }
-        
+
         fn visit_and(&mut self, exprs: &[ExprKind]) -> Self::Output {
             let bools: Result<Vec<_>, _> = exprs.iter().map(|e| self.visit(e)).collect();
             let bools = bools?;
             let refs: Vec<_> = bools.iter().collect();
             Ok(ast::Bool::and(&refs))
         }
-        
+
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
             let bools: Result<Vec<_>, _> = exprs.iter().map(|e| self.visit(e)).collect();
             let bools = bools?;
             let refs: Vec<_> = bools.iter().collect();
             Ok(ast::Bool::or(&refs))
         }
-        
+
         fn visit_not(&mut self, expr: &ExprKind) -> Self::Output {
             let inner = self.visit(expr)?;
             Ok(inner.not())
@@ -691,7 +741,9 @@ mod tests {
         let result = ExpressionParser::parse("self.balance > 0").unwrap();
         match result {
             ExprKind::BinaryOp { left, op, right } => {
-                assert!(matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "balance"));
+                assert!(
+                    matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "balance")
+                );
                 assert_eq!(op, ComparisonOp::Gt);
                 assert!(matches!(*right, ExprKind::IntLiteral(0)));
             }
@@ -704,7 +756,9 @@ mod tests {
         let result = ExpressionParser::parse("self.count <= 100").unwrap();
         match result {
             ExprKind::BinaryOp { left, op, right } => {
-                assert!(matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "count"));
+                assert!(
+                    matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "count")
+                );
                 assert_eq!(op, ComparisonOp::Le);
                 assert!(matches!(*right, ExprKind::IntLiteral(100)));
             }
@@ -717,7 +771,9 @@ mod tests {
         let result = ExpressionParser::parse("self.id == 42").unwrap();
         match result {
             ExprKind::BinaryOp { left, op, right } => {
-                assert!(matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "id"));
+                assert!(
+                    matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "id")
+                );
                 assert_eq!(op, ComparisonOp::Eq);
                 assert!(matches!(*right, ExprKind::IntLiteral(42)));
             }
@@ -730,7 +786,9 @@ mod tests {
         let result = ExpressionParser::parse("self.status != 0").unwrap();
         match result {
             ExprKind::BinaryOp { left, op, right } => {
-                assert!(matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "status"));
+                assert!(
+                    matches!(*left, ExprKind::FieldAccess { ref field_name } if field_name == "status")
+                );
                 assert_eq!(op, ComparisonOp::Ne);
                 assert!(matches!(*right, ExprKind::IntLiteral(0)));
             }
@@ -800,18 +858,22 @@ mod tests {
         // Arithmetic (prec 4) should bind tighter than Comparison (prec 3)
         let result = ExpressionParser::parse("self.x + 2 > 5").unwrap();
         match result {
-             ExprKind::BinaryOp { left, op, right } => {
-                  assert_eq!(op, ComparisonOp::Gt);
-                  assert!(matches!(*right, ExprKind::IntLiteral(5)));
-                  
-                  match *left {
-                      ExprKind::ArithmeticOp { left: _l2, op: op2, right: _r2 } => {
-                           assert_eq!(op2, ArithmeticOp::Add);
-                      }
-                      _ => panic!("Expected ArithmeticOp on LHS"),
-                  }
-             }
-             _ => panic!("Expected BinaryOp"),
+            ExprKind::BinaryOp { left, op, right } => {
+                assert_eq!(op, ComparisonOp::Gt);
+                assert!(matches!(*right, ExprKind::IntLiteral(5)));
+
+                match *left {
+                    ExprKind::ArithmeticOp {
+                        left: _l2,
+                        op: op2,
+                        right: _r2,
+                    } => {
+                        assert_eq!(op2, ArithmeticOp::Add);
+                    }
+                    _ => panic!("Expected ArithmeticOp on LHS"),
+                }
+            }
+            _ => panic!("Expected BinaryOp"),
         }
     }
 }
