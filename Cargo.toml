@@ -31,7 +31,8 @@ lazy_static = "1.4"
 sha2 = "0.10"
 
 # Core types (CheckProtocol, etc.)
-praborrow-core = { path = "../praborrow-core", version = "0.4.0", default-features = false }
+praborrow-core = { path = "../praborrow-core", version = "0.5.0", default-features = false }
+lru = "0.16.3"
 
 [dev-dependencies]
 # For integration testing

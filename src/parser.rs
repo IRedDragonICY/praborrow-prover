@@ -234,7 +234,26 @@ impl ExpressionParser {
         }
         
         // Try to parse as a comparison expression
-        Self::parse_comparison(expr)
+        let result = Self::parse_comparison(expr)?;
+        
+        // Validate that the result is a comparison/logical expression, not just an operand
+        // This ensures invariants like "self.balance" (missing operator) are rejected
+        match &result {
+            ExprKind::BinaryOp { .. } |
+            ExprKind::And(_) |
+            ExprKind::Or(_) |
+            ExprKind::Not(_) => Ok(result),
+            ExprKind::FieldAccess { .. } |
+            ExprKind::IntLiteral(_) |
+            ExprKind::UIntLiteral(_) => Err(ProofError::ParseError(
+                "Expression must be a comparison (e.g., 'self.x > 0'), not just a value".to_string()
+            )),
+            // Allow arithmetic/bitwise as they may be part of larger expressions
+            ExprKind::ArithmeticOp { .. } |
+            ExprKind::BitwiseOp { .. } => Err(ProofError::ParseError(
+                "Expression must be a comparison (e.g., 'self.x > 0'), not just arithmetic".to_string()
+            )),
+        }
     }
     
     /// Parses a comparison expression.
@@ -432,7 +451,22 @@ fn find_last_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
                 if depth == 0 {
                      // Check if op starts here
                      if expr[i..].starts_with(op) {
-                         // Careful with multi-char ops in backwards scan, this logic assumes we invoke it knowing op length
+                         // For - and +, check if this is a binary op (preceded by a value-like token)
+                         // not a unary op (preceded by another operator or start of expr)
+                         if op == "-" || op == "+" {
+                             if i == 0 {
+                                 // At start of expression, it's unary
+                                 continue;
+                             }
+                             let prev_char = bytes[i - 1];
+                             // If preceded by ), digit, or alphanumeric (end of identifier), it's binary
+                             // If preceded by operator chars or space after operator, it's unary
+                             if prev_char == b')' || prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
+                                 return Some(i);
+                             }
+                             // Otherwise skip this - it's likely unary
+                             continue;
+                         }
                          return Some(i);
                     }
                 }

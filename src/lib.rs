@@ -39,10 +39,13 @@ pub mod parser;
 
 extern crate alloc;
 
-#[cfg(feature = "std")]
-use std::collections::HashMap;
+
 #[cfg(feature = "std")]
 use std::sync::Mutex;
+#[cfg(feature = "std")]
+use lru::LruCache;
+#[cfg(feature = "std")]
+use std::num::NonZeroUsize;
 
 #[cfg(feature = "std")]
 use lazy_static::lazy_static;
@@ -50,6 +53,8 @@ use sha2::{Sha256, Digest};
 use thiserror::Error;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+
+// ... (skipping Z3 imports which remain the same) ...
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
@@ -137,7 +142,7 @@ pub enum CacheResult {
 /// - The invariant expressions
 #[cfg(feature = "std")]
 pub struct VerificationCache {
-    inner: Mutex<HashMap<[u8; 32], bool>>,
+    inner: Mutex<LruCache<[u8; 32], bool>>,
 }
 
 #[cfg(feature = "std")]
@@ -145,7 +150,7 @@ impl VerificationCache {
     /// Creates a new empty cache.
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(LruCache::new(NonZeroUsize::new(10000).unwrap())),
         }
     }
 
@@ -162,7 +167,7 @@ impl VerificationCache {
 
     /// Looks up a cached result.
     pub fn lookup(&self, key: &[u8; 32]) -> CacheResult {
-        let guard = self.inner.lock().unwrap();
+        let mut guard = self.inner.lock().unwrap();
         match guard.get(key) {
             Some(true) => CacheResult::Hit,
             Some(false) => CacheResult::Failed,
@@ -173,7 +178,7 @@ impl VerificationCache {
     /// Stores a verification result.
     pub fn store(&self, key: [u8; 32], success: bool) {
         let mut guard = self.inner.lock().unwrap();
-        guard.insert(key, success);
+        guard.put(key, success);
     }
 
     /// Clears all cached results.
