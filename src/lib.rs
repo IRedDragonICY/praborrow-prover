@@ -58,11 +58,39 @@ use alloc::vec::Vec;
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
-use z3::{Config, Context, Solver, SatResult};
+pub use z3::{Config, Context, Solver, SatResult};
 
 // Re-export Z3 types when available
 #[cfg(feature = "z3-backend")]
 pub use z3::{ast, Sort};
+
+// Stub Z3 types when backend is disabled
+#[cfg(not(feature = "z3-backend"))]
+pub mod z3_stub {
+    #[derive(Debug, Clone)]
+    pub struct Context;
+    #[derive(Debug, Clone)]
+    pub struct Solver;
+    pub mod ast {
+        use std::marker::PhantomData;
+        #[derive(Debug, Clone)]
+        pub struct Int<'a>(PhantomData<&'a ()>);
+        #[derive(Debug, Clone)]
+        pub struct Bool<'a>(PhantomData<&'a ()>);
+        pub trait Ast<'ctx> {}
+        impl<'ctx> Ast<'ctx> for Int<'ctx> {}
+        impl<'ctx> Ast<'ctx> for Bool<'ctx> {}
+        
+        impl<'ctx> Int<'ctx> {
+            pub fn from_i64(_ctx: &super::Context, _v: i64) -> Self { Self(PhantomData) }
+            pub fn from_u64(_ctx: &super::Context, _v: u64) -> Self { Self(PhantomData) }
+        }
+    }
+}
+
+#[cfg(not(feature = "z3-backend"))]
+pub use z3_stub::{Context, ast};
+
 
 /// Errors that can occur during formal verification.
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -256,6 +284,28 @@ mod z3_backend {
                 SatResult::Unknown => Err(ProofError::Unknown),
             }
         }
+
+        /// Verifies a set of invariants using the provided field provider.
+        pub fn verify_invariants<'ctx, P>(&'ctx self, provider: &P, invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        where
+            P: crate::parser::FieldValueProvider<'ctx> + ?Sized,
+        {
+            use crate::parser::{ExpressionParser, Z3AstGenerator};
+            let mut assertions = Vec::new(); // Store AST nodes here if needed, but they are bound to context
+            // Actually Z3AstGenerator generates 'ctx Bools.
+            // We need to collect them.
+            let mut bools = Vec::new();
+            
+            for inv in invariants {
+                let expr = ExpressionParser::parse(inv)?;
+                let mut generator = Z3AstGenerator::new(&self.context, provider);
+                let assertion = generator.generate(&expr)?;
+                bools.push(assertion);
+            }
+            
+            let refs: Vec<&_> = bools.iter().collect();
+            self.check_assertions(&refs)
+        }
     }
 }
 
@@ -273,6 +323,14 @@ mod stub_backend {
     /// Stub SMT context when Z3 is not available.
     ///
     /// This always returns success. Use the `z3-backend` feature for real verification.
+    ///
+    /// # Warning
+    ///
+    /// This stub provides NO actual verification. It is intended only for:
+    /// - Development environments without Z3 installed
+    /// - Quick prototyping before enabling formal verification
+    ///
+    /// **DO NOT use in production without the `z3-backend` feature enabled.**
     pub struct SmtContext {
         _private: (),
     }
@@ -290,8 +348,30 @@ mod stub_backend {
         /// This does NOT perform actual SMT verification.
         /// Enable the `z3-backend` feature for real verification.
         pub fn verify_stub(&self) -> Result<VerificationToken, ProofError> {
-            // In stub mode, we trust the runtime checks
+            // Emit a warning in debug builds to alert developers
+            #[cfg(debug_assertions)]
+            tracing::warn!(
+                target: "praborrow_prover",
+                "⚠️  STUB VERIFICATION: Formal verification passed trivially (Z3 backend disabled). \
+                 This provides NO safety guarantees. DO NOT RELY ON THIS IN PRODUCTION. \
+                 Enable the 'z3-backend' feature for actual SMT verification."
+            );
+
+            // In release builds without z3, still log at trace level
+            #[cfg(not(debug_assertions))]
+            tracing::trace!(
+                target: "praborrow_prover",
+                "Stub verification used (z3-backend feature not enabled)"
+            );
+
             Ok(VerificationToken::new())
+        }
+
+        pub fn verify_invariants<'ctx, P>(&'ctx self, _provider: &P, _invariants: &[&str]) -> Result<VerificationToken, ProofError>
+        where
+            P: crate::parser::FieldValueProvider<'ctx> + ?Sized,
+        {
+            self.verify_stub()
         }
     }
 
@@ -333,7 +413,18 @@ pub trait ProveInvariant {
     /// # Without `z3-backend` feature
     ///
     /// Returns `Ok(VerificationToken)` as a stub (relies on runtime checks).
-    fn verify(&self) -> Result<VerificationToken, ProofError>;
+    fn verify(&self) -> Result<VerificationToken, ProofError> {
+        let ctx = SmtContext::new()?;
+        self.verify_with_context(&ctx)
+    }
+
+    /// Verifies invariants using a specific SMT context.
+    ///
+    /// This allows reusing the context for efficiency or custom configuration.
+    fn verify_with_context(
+        &self,
+        ctx: &SmtContext,
+    ) -> Result<VerificationToken, ProofError>;
 
     /// Verifies invariants with caching.
     ///

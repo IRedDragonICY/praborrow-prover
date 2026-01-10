@@ -510,29 +510,36 @@ fn find_last_op_outside_parens(expr: &str, op: &str) -> Option<usize> {
 }
 
 // ============================================================================
+// Verification Interfaces (Used by Macro)
+// ============================================================================
+
+use crate::{Context, ast};
+
+/// Field value provider for Z3 AST generation.
+///
+/// This trait is implemented by generated code to map field names to Z3 AST nodes.
+pub trait FieldValueProvider<'ctx> {
+    /// Returns the Z3 AST for a field, or an error if the field doesn't exist.
+    fn get_field_z3(&self, ctx: &'ctx Context, field_name: &str) -> Result<ast::Int<'ctx>, ProofError>;
+}
+
+// ============================================================================
 // Z3-specific implementations (only when z3-backend feature is enabled)
 // ============================================================================
 
 #[cfg(feature = "z3-backend")]
 mod z3_impl {
     use super::*;
-    use z3::{ast, Context};
-
-    /// Field value provider for Z3 AST generation.
-    ///
-    /// This trait is implemented by generated code to map field names to Z3 AST nodes.
-    pub trait FieldValueProvider<'ctx> {
-        /// Returns the Z3 AST for a field, or an error if the field doesn't exist.
-        fn get_field_z3(&self, ctx: &'ctx Context, field_name: &str) -> Result<ast::Int<'ctx>, ProofError>;
-    }
+    // Use types from crate root which are aliases to z3 types when backend is on
+    use crate::{Context, ast};
 
     /// Visitor that generates Z3 AST from parsed expressions.
-    pub struct Z3AstGenerator<'ctx, 'prov, P: FieldValueProvider<'ctx>> {
+    pub struct Z3AstGenerator<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> {
         ctx: &'ctx Context,
         provider: &'prov P,
     }
 
-    impl<'ctx, 'prov, P: FieldValueProvider<'ctx>> Z3AstGenerator<'ctx, 'prov, P> {
+    impl<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> Z3AstGenerator<'ctx, 'prov, P> {
         /// Creates a new Z3 AST generator.
         pub fn new(ctx: &'ctx Context, provider: &'prov P) -> Self {
             Self { ctx, provider }
@@ -567,7 +574,7 @@ mod z3_impl {
         }
     }
 
-    impl<'ctx, 'prov, P: FieldValueProvider<'ctx>> ExprVisitor for Z3AstGenerator<'ctx, 'prov, P> {
+    impl<'ctx, 'prov, P: FieldValueProvider<'ctx> + ?Sized> ExprVisitor for Z3AstGenerator<'ctx, 'prov, P> {
         type Output = Result<ast::Bool<'ctx>, ProofError>;
         
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
@@ -609,41 +616,20 @@ mod z3_impl {
         
         fn visit_bitwise_op(
             &mut self,
-            left: &ExprKind,
-            op: BitwiseOp,
-            right: &ExprKind,
+            _left: &ExprKind,
+            _op: BitwiseOp,
+            _right: &ExprKind,
         ) -> Self::Output {
-             // Z3 Ints don't support bitwise ops directly in standard SMT-LIB without BV mapping.
-             // We will try to map to BV if possible, but the current context is Int.
-             // For this iteration, as per instructions: "add the AST nodes... If BitVectors are too complex, stick to Arithmetic".
-             // We will ERROR here for now if using Z3 Int backend, or implement basic ones if Z3 supports Int bitwise extensions.
-             // Z3 *does* have some Int bitwise support in some contexts but it is non-standard.
-             // Let's return error for now to be safe, or implement simple ones.
-             
-             // However, for the purpose of the task "Map the new ExprKind variants to their corresponding Z3 methods",
-             // we should try. "Note: Z3 Ints don't support bitwise ops easily...".
-             // We will return UnsupportedType for now as a safe implementation of the "Note".
-             Err(ProofError::UnsupportedType("Bitwise operations on Infinite Integers not supported yet. Use BitVectors.".to_string()))
+             // Z3 Int bitwise ops not supported in this binding context easily
+             Err(ProofError::UnsupportedType("Bitwise operations on Infinite Integers not supported yet.".to_string()))
         }
 
         fn visit_arithmetic_op(
             &mut self,
-            left: &ExprKind,
-            op: ArithmeticOp,
-            right: &ExprKind,
+            _left: &ExprKind,
+            _op: ArithmeticOp,
+            _right: &ExprKind,
         ) -> Self::Output {
-             // Arithmetic ops return Int, but this visitor expects Bool (for the top level?)
-             // Wait, generate() returns Bool. But recursive calls might need Int.
-             // The structure of Z3AstGenerator assumes `visit` always returns `Result<ast::Bool>`.
-             // But for ArithmeticOp, we expect `ast::Int`.
-             // We need to refactor Z3AstGenerator to handle different return types or split visitors.
-             // For now, failure seems appropriate because strict type system.
-             
-             // BUT, we can support arithmetic *inside* comparisons.
-             // We need `get_int_ast` to recursively call visit? No, `visit` returns Bool.
-             // We need a separate `visit_int`?
-             
-             // Let's modify `get_int_ast` to handle ArithmeticOp recursively.
              Err(ProofError::ParseError("Arithmetic at top-level is not a boolean assertion".to_string()))
         }
         
@@ -669,7 +655,7 @@ mod z3_impl {
 }
 
 #[cfg(feature = "z3-backend")]
-pub use z3_impl::{FieldValueProvider, Z3AstGenerator};
+pub use z3_impl::Z3AstGenerator;
 
 // ============================================================================
 // Tests
