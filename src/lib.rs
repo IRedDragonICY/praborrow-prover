@@ -72,22 +72,38 @@ pub mod z3_stub {
     #[derive(Debug, Clone)]
     pub struct Solver;
     pub mod ast {
-        use core::marker::PhantomData;
         #[derive(Debug, Clone)]
-        pub struct Int<'a>(PhantomData<&'a ()>);
+        pub struct Int;
         #[derive(Debug, Clone)]
-        pub struct Bool<'a>(PhantomData<&'a ()>);
-        pub trait Ast<'ctx> {}
-        impl<'ctx> Ast<'ctx> for Int<'ctx> {}
-        impl<'ctx> Ast<'ctx> for Bool<'ctx> {}
+        pub struct Bool;
 
-        impl<'ctx> Int<'ctx> {
-            pub fn from_i64(_ctx: &super::Context, _v: i64) -> Self {
-                Self(PhantomData)
+        impl Int {
+            pub fn from_i64(_v: i64) -> Self {
+                Self
             }
-            pub fn from_u64(_ctx: &super::Context, _v: u64) -> Self {
-                Self(PhantomData)
+            pub fn from_u64(_v: u64) -> Self {
+                Self
             }
+        }
+        
+        // Mock ops for Int
+        impl core::ops::Add for Int { type Output = Self; fn add(self, _: Self) -> Self { Self } }
+        impl core::ops::Sub for Int { type Output = Self; fn sub(self, _: Self) -> Self { Self } }
+        impl core::ops::Mul for Int { type Output = Self; fn mul(self, _: Self) -> Self { Self } }
+        impl core::ops::Div for Int { type Output = Self; fn div(self, _: Self) -> Self { Self } }
+        impl Int {
+            pub fn rem(&self, _: &Self) -> Self { Self }
+            pub fn gt(&self, _: &Self) -> Bool { Bool }
+            pub fn lt(&self, _: &Self) -> Bool { Bool }
+            pub fn eq(&self, _: &Self) -> Bool { Bool }
+            pub fn ge(&self, _: &Self) -> Bool { Bool }
+            pub fn le(&self, _: &Self) -> Bool { Bool }
+        }
+
+        impl Bool {
+            pub fn and(_: &[&Self]) -> Self { Self }
+            pub fn or(_: &[&Self]) -> Self { Self }
+            pub fn not(&self) -> Self { Self }
         }
     }
 }

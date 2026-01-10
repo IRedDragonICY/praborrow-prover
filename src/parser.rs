@@ -470,7 +470,7 @@ use crate::ast;
 /// This trait is implemented by generated code to map field names to Z3 AST nodes.
 pub trait FieldValueProvider {
     /// Returns the Z3 AST for a field, or an error if the field doesn't exist.
-    fn get_field_z3(&self, field_name: &str) -> Result<ast::Int<'_>, ProofError>;
+    fn get_field_z3(&self, field_name: &str) -> Result<ast::Int, ProofError>;
 }
 
 // ============================================================================
@@ -598,7 +598,7 @@ impl Tokenizer {
 mod z3_impl {
     use super::*;
     // Use types from crate root which are aliases to z3 types when backend is on
-    use crate::{Context, ast};
+    use crate::ast;
 
     /// Visitor that generates Z3 AST from parsed expressions.
     pub struct Z3AstGenerator<'prov, P: FieldValueProvider + ?Sized> {
