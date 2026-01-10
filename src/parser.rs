@@ -628,8 +628,8 @@ mod z3_impl {
             Ok(match op {
                 ComparisonOp::Gt => left_ast.gt(&right_ast),
                 ComparisonOp::Lt => left_ast.lt(&right_ast),
-                ComparisonOp::Eq => left_ast._eq(&right_ast),
-                ComparisonOp::Ne => left_ast._eq(&right_ast).not(),
+                ComparisonOp::Eq => left_ast.eq(&right_ast),
+                ComparisonOp::Ne => left_ast.eq(&right_ast).not(),
                 ComparisonOp::Ge => left_ast.ge(&right_ast),
                 ComparisonOp::Le => left_ast.le(&right_ast),
             })

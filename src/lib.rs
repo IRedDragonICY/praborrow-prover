@@ -287,7 +287,7 @@ mod z3_backend {
             P: crate::parser::FieldValueProvider + ?Sized,
         {
             use crate::parser::{ExpressionParser, Z3AstGenerator};
-            let mut assertions = Vec::new(); // Store AST nodes here if needed, but they are bound to context
+
             // Actually Z3AstGenerator generates 'ctx Bools.
             // We need to collect them.
             let mut bools = Vec::new();
@@ -510,7 +510,7 @@ mod z3_impls {
 }
 
 #[cfg(feature = "z3-backend")]
-pub use z3_impls::*;
+
 
 // ============================================================================
 // Tests
