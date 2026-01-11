@@ -178,6 +178,10 @@ pub enum ProofError {
     /// Z3 backend is not enabled.
     #[error("Z3 backend not enabled - using stub verification")]
     BackendNotEnabled,
+
+    /// Invalid integer literal.
+    #[error("Invalid integer literal")]
+    IntParseError(#[from] core::num::ParseIntError),
 }
 
 /// A zero-sized type that serves as cryptographic proof that verification passed.

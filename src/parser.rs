@@ -551,9 +551,7 @@ impl Tokenizer {
                                     break;
                                 }
                             }
-                            let val = i64::from_str_radix(&hex_val, 16).map_err(|_| {
-                                ProofError::ParseError("Invalid hex literal".to_string())
-                            })?;
+                            let val = i64::from_str_radix(&hex_val, 16)?;
                             tokens.push(Token::Literal(val));
                             continue;
                         }
@@ -569,8 +567,7 @@ impl Tokenizer {
                     }
                 }
                 let val = num_str
-                    .parse::<i64>()
-                    .map_err(|_| ProofError::ParseError("Invalid integer".to_string()))?;
+                    .parse::<i64>()?;
                 tokens.push(Token::Literal(val));
             } else if Self::is_start_of_identifier(c) {
                 let mut ident = String::new();
