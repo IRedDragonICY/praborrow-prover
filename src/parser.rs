@@ -652,6 +652,21 @@ mod z3_impl {
                         ArithmeticOp::Rem => left_ast.rem(&right_ast),
                     })
                 }
+                ExprKind::BitwiseOp { left, op, right } => {
+                    let left_ast = self.get_int_ast(left)?;
+                    let right_ast = self.get_int_ast(right)?;
+                    // Assume 64-bit width for implementation
+                    let left_bv = ast::BV::from_int(&left_ast, 64);
+                    let right_bv = ast::BV::from_int(&right_ast, 64);
+                    let res_bv = match op {
+                        BitwiseOp::And => left_bv.bvand(&right_bv),
+                        BitwiseOp::Or => left_bv.bvor(&right_bv),
+                        BitwiseOp::Xor => left_bv.bvxor(&right_bv),
+                        BitwiseOp::Shl => left_bv.bvshl(&right_bv),
+                        BitwiseOp::Shr => left_bv.bvlshr(&right_bv),
+                    };
+                    Ok(res_bv.to_int(false))
+                }
                 _ => Err(ProofError::UnsupportedType(format!(
                     "Expected integer expression, got: {:?}",
                     expr
