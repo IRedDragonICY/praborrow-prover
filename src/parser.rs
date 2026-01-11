@@ -35,6 +35,9 @@ pub enum ExprKind {
     /// An unsigned integer literal.
     UIntLiteral(u64),
 
+    /// A boolean literal.
+    BooleanLiteral(bool),
+
     /// A field access expression (e.g., `self.balance`).
     FieldAccess {
         /// The field name (without `self.` prefix).
@@ -151,6 +154,9 @@ pub trait ExprVisitor {
     /// Visit an unsigned integer literal.
     fn visit_uint_literal(&mut self, value: u64) -> Self::Output;
 
+    /// Visit a boolean literal.
+    fn visit_boolean_literal(&mut self, value: bool) -> Self::Output;
+
     /// Visit a field access.
     fn visit_field_access(&mut self, field_name: &str) -> Self::Output;
 
@@ -192,6 +198,7 @@ pub trait ExprVisitor {
         match expr {
             ExprKind::IntLiteral(v) => self.visit_int_literal(*v),
             ExprKind::UIntLiteral(v) => self.visit_uint_literal(*v),
+            ExprKind::BooleanLiteral(v) => self.visit_boolean_literal(*v),
             ExprKind::FieldAccess { field_name } => self.visit_field_access(field_name),
             ExprKind::BitwiseOp { left, op, right } => self.visit_bitwise_op(left, *op, right),
             ExprKind::ArithmeticOp { left, op, right } => {
@@ -243,15 +250,18 @@ impl ExpressionParser {
         // Validate that the result is a comparison/logical expression, not just an operand
         // This ensures invariants like "self.balance" (missing operator) are rejected
         match &result {
-            ExprKind::BinaryOp { .. } | ExprKind::And(_) | ExprKind::Or(_) | ExprKind::Not(_) => {
-                Ok(result)
-            }
-            ExprKind::FieldAccess { .. } | ExprKind::IntLiteral(_) | ExprKind::UIntLiteral(_) => {
-                Err(ProofError::ParseError(
+            ExprKind::BinaryOp { .. }
+            | ExprKind::And(_)
+            | ExprKind::Or(_)
+            | ExprKind::Not(_)
+            | ExprKind::BooleanLiteral(_) => Ok(result),
+            ExprKind::FieldAccess { .. }
+            | ExprKind::IntLiteral(_)
+            | ExprKind::UIntLiteral(_) => Err(ProofError::ParseError(
                     "Expression must be a comparison (e.g., 'self.x > 0'), not just a value"
                         .to_string(),
-                ))
-            }
+                )),
+
             // Allow arithmetic/bitwise as they may be part of larger expressions
             ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => {
                 Err(ProofError::ParseError(
@@ -331,6 +341,7 @@ impl ExpressionParser {
                 Ok((expr, 1 + consumed + 1))
             }
             Token::Literal(n) => Ok((ExprKind::IntLiteral(*n), 1)),
+            Token::Bool(b) => Ok((ExprKind::BooleanLiteral(*b), 1)),
             Token::Field(name) => {
                 if let Some(field_part) = name.strip_prefix("self.") {
                     let field_part = &field_part;
@@ -480,6 +491,7 @@ pub trait FieldValueProvider {
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
     Literal(i64),
+    Bool(bool),
     Field(String),
     Op(String),
     LParen,
@@ -570,7 +582,11 @@ impl Tokenizer {
                         break;
                     }
                 }
-                tokens.push(Token::Field(ident));
+                match ident.as_str() {
+                    "true" => tokens.push(Token::Bool(true)),
+                    "false" => tokens.push(Token::Bool(false)),
+                    _ => tokens.push(Token::Field(ident)),
+                }
             } else {
                 let mut op = String::new();
                 op.push(chars.next().unwrap());
@@ -598,17 +614,20 @@ impl Tokenizer {
 mod z3_impl {
     use super::*;
     // Use types from crate root which are aliases to z3 types when backend is on
+    // Use types from crate root which are aliases to z3 types when backend is on
     use crate::ast;
+    use crate::Context;
 
     /// Visitor that generates Z3 AST from parsed expressions.
-    pub struct Z3AstGenerator<'prov, P: FieldValueProvider + ?Sized> {
+    pub struct Z3AstGenerator<'prov, 'ctx, P: FieldValueProvider + ?Sized> {
         provider: &'prov P,
+        ctx: &'ctx Context,
     }
 
-    impl<'prov, P: FieldValueProvider + ?Sized> Z3AstGenerator<'prov, P> {
+    impl<'prov, 'ctx, P: FieldValueProvider + ?Sized> Z3AstGenerator<'prov, 'ctx, P> {
         /// Creates a new Z3 AST generator.
-        pub fn new(provider: &'prov P) -> Self {
-            Self { provider }
+        pub fn new(ctx: &'ctx Context, provider: &'prov P) -> Self {
+            Self { provider, ctx }
         }
 
         /// Generates a Z3 boolean assertion from an expression.
@@ -641,7 +660,7 @@ mod z3_impl {
         }
     }
 
-    impl<'prov, P: FieldValueProvider + ?Sized> ExprVisitor for Z3AstGenerator<'prov, P> {
+    impl<'prov, 'ctx, P: FieldValueProvider + ?Sized> ExprVisitor for Z3AstGenerator<'prov, 'ctx, P> {
         type Output = Result<ast::Bool, ProofError>;
 
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
@@ -654,6 +673,10 @@ mod z3_impl {
             Err(ProofError::ParseError(
                 "Unsigned integer literal cannot be used as boolean".to_string(),
             ))
+        }
+
+        fn visit_boolean_literal(&mut self, value: bool) -> Self::Output {
+            Ok(ast::Bool::from_bool(self.ctx, value))
         }
 
         fn visit_field_access(&mut self, _field_name: &str) -> Self::Output {
@@ -876,4 +899,40 @@ mod tests {
             _ => panic!("Expected BinaryOp"),
         }
     }
+
+    #[test]
+    fn test_parse_boolean_literals() {
+        let result = ExpressionParser::parse("true").unwrap();
+        assert!(matches!(result, ExprKind::BooleanLiteral(true)));
+
+        let result = ExpressionParser::parse("false").unwrap();
+        assert!(matches!(result, ExprKind::BooleanLiteral(false)));
+    }
+
+    #[test]
+    fn test_complex_grouping_precedence() {
+        // (self.a == 1 || self.b == 2) && self.c == 3
+        let result = ExpressionParser::parse("(self.a == 1 || self.b == 2) && self.c == 3").unwrap();
+        match result {
+             ExprKind::And(exprs) => {
+                 assert_eq!(exprs.len(), 2);
+                 match &exprs[0] {
+                     ExprKind::Or(_) => {}, // Correct (self.a || self.b)
+                     _ => panic!("Expected Or on LHS, got {:?}", exprs[0]),
+                 }
+                 match &exprs[1] {
+                     ExprKind::BinaryOp { .. } => {}, // self.c == 3
+                     _ => panic!("Expected BinaryOp on RHS"),
+                 }
+             }
+             _ => panic!("Expected And as root, got {:?}", result),
+        }
+    }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+
+

@@ -133,6 +133,9 @@ pub mod z3_stub {
         }
 
         impl Bool {
+            pub fn from_bool(_ctx: &crate::Context, _b: bool) -> Self {
+                Self
+            }
             pub fn and(_: &[&Self]) -> Self {
                 Self
             }
@@ -301,21 +304,20 @@ mod z3_backend {
     /// Z3 contexts are NOT thread-safe. Each thread should create its own `SmtContext`.
     /// The global cache (`GLOBAL_CACHE`) is thread-safe and can be shared.
     pub struct SmtContext {
-        // Z3 context is thread-local in 0.19+
-        _private: (),
+        pub context: Context,
     }
 
     impl SmtContext {
         /// Creates a new SMT context with default configuration.
         pub fn new() -> Result<Self, ProofError> {
-            let _config = Config::new();
-            // In z3 0.19+, context is implicit/thread-local or global
-            Ok(Self { _private: () })
+            let config = Config::new();
+            let context = Context::new(&config);
+            Ok(Self { context })
         }
 
         /// Creates a new solver for this context.
         pub fn new_solver(&self) -> Solver {
-            Solver::new()
+            Solver::new(&self.context)
         }
 
         /// Checks if assertions are satisfiable using a fresh solver.
@@ -357,7 +359,7 @@ mod z3_backend {
 
             for inv in invariants {
                 let expr = ExpressionParser::parse(inv)?;
-                let mut generator = Z3AstGenerator::new(provider);
+                let mut generator = Z3AstGenerator::new(&self.context, provider);
                 let assertion = generator.generate(&expr)?;
                 bools.push(assertion);
             }
@@ -391,13 +393,13 @@ mod stub_backend {
     ///
     /// **DO NOT use in production without the `z3-backend` feature enabled.**
     pub struct SmtContext {
-        _private: (),
+        pub context: Context,
     }
 
     impl SmtContext {
         /// Creates a new stub context.
         pub fn new() -> Result<Self, ProofError> {
-            Ok(Self { _private: () })
+            Ok(Self { context: Context })
         }
 
         /// Stub verification - always succeeds.
