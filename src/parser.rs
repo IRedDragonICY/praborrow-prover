@@ -275,7 +275,7 @@ impl ExpressionParser {
     /// Parses a comparison expression using precedence climbing.
     fn parse_comparison(expr: &str) -> Result<ExprKind, ProofError> {
         let tokens = Tokenizer::tokenize(expr)?;
-        let (expr, _) = Self::parse_expression_climbing(&tokens, 0)?;
+        let (expr, _) = Self::parse_expression_climbing(&tokens, 0, 0)?;
         Ok(expr)
     }
 
@@ -283,7 +283,14 @@ impl ExpressionParser {
     fn parse_expression_climbing(
         tokens: &[Token],
         min_precedence: u8,
+        depth: usize,
     ) -> Result<(ExprKind, usize), ProofError> {
+        if depth > 50 {
+            return Err(ProofError::ParseError(
+                "Maximum recursion depth exceeded (limit 50)".to_string(),
+            ));
+        }
+
         if tokens.is_empty() {
             return Err(ProofError::ParseError(
                 "Unexpected end of expression".to_string(),
@@ -291,7 +298,7 @@ impl ExpressionParser {
         }
 
         // 1. Parse LHS (atom)
-        let (mut lhs, mut idx) = Self::parse_atom(tokens)?;
+        let (mut lhs, mut idx) = Self::parse_atom(tokens, depth + 1)?;
 
         // 2. Loop while next token is operator with precedence >= min_precedence
         while idx < tokens.len() {
@@ -313,7 +320,7 @@ impl ExpressionParser {
                 let next_min_precedence = precedence + 1;
 
                 let (rhs, rhs_consumed) =
-                    Self::parse_expression_climbing(&tokens[idx..], next_min_precedence)?;
+                    Self::parse_expression_climbing(&tokens[idx..], next_min_precedence, depth + 1)?;
                 idx += rhs_consumed;
 
                 lhs = Self::combine_expr(lhs, &op_str, rhs)?;
@@ -325,7 +332,7 @@ impl ExpressionParser {
         Ok((lhs, idx))
     }
 
-    fn parse_atom(tokens: &[Token]) -> Result<(ExprKind, usize), ProofError> {
+    fn parse_atom(tokens: &[Token], depth: usize) -> Result<(ExprKind, usize), ProofError> {
         if tokens.is_empty() {
             return Err(ProofError::ParseError(
                 "Unexpected end of expression".to_string(),
@@ -334,7 +341,7 @@ impl ExpressionParser {
 
         match &tokens[0] {
             Token::LParen => {
-                let (expr, consumed) = Self::parse_expression_climbing(&tokens[1..], 0)?;
+                let (expr, consumed) = Self::parse_expression_climbing(&tokens[1..], 0, depth + 1)?;
                 if tokens.len() <= 1 + consumed || tokens[1 + consumed] != Token::RParen {
                     return Err(ProofError::ParseError("Mismatched parentheses".to_string()));
                 }

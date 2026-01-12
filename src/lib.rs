@@ -245,7 +245,7 @@ impl VerificationCache {
     /// Creates a new empty cache.
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(LruCache::new(NonZeroUsize::new(10000).unwrap())),
+            inner: Mutex::new(LruCache::new(NonZeroUsize::new(10000).expect("Cache size > 0"))),
         }
     }
 
