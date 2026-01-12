@@ -255,12 +255,12 @@ impl ExpressionParser {
             | ExprKind::Or(_)
             | ExprKind::Not(_)
             | ExprKind::BooleanLiteral(_) => Ok(result),
-            ExprKind::FieldAccess { .. }
-            | ExprKind::IntLiteral(_)
-            | ExprKind::UIntLiteral(_) => Err(ProofError::ParseError(
+            ExprKind::FieldAccess { .. } | ExprKind::IntLiteral(_) | ExprKind::UIntLiteral(_) => {
+                Err(ProofError::ParseError(
                     "Expression must be a comparison (e.g., 'self.x > 0'), not just a value"
                         .to_string(),
-                )),
+                ))
+            }
 
             // Allow arithmetic/bitwise as they may be part of larger expressions
             ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => {
@@ -566,8 +566,7 @@ impl Tokenizer {
                         break;
                     }
                 }
-                let val = num_str
-                    .parse::<i64>()?;
+                let val = num_str.parse::<i64>()?;
                 tokens.push(Token::Literal(val));
             } else if Self::is_start_of_identifier(c) {
                 let mut ident = String::new();
@@ -612,8 +611,8 @@ mod z3_impl {
     use super::*;
     // Use types from crate root which are aliases to z3 types when backend is on
     // Use types from crate root which are aliases to z3 types when backend is on
-    use crate::ast;
     use crate::Context;
+    use crate::ast;
 
     /// Visitor that generates Z3 AST from parsed expressions.
     pub struct Z3AstGenerator<'prov, 'ctx, P: FieldValueProvider + ?Sized> {
@@ -924,20 +923,21 @@ mod tests {
     #[test]
     fn test_complex_grouping_precedence() {
         // (self.a == 1 || self.b == 2) && self.c == 3
-        let result = ExpressionParser::parse("(self.a == 1 || self.b == 2) && self.c == 3").unwrap();
+        let result =
+            ExpressionParser::parse("(self.a == 1 || self.b == 2) && self.c == 3").unwrap();
         match result {
-             ExprKind::And(exprs) => {
-                 assert_eq!(exprs.len(), 2);
-                 match &exprs[0] {
-                     ExprKind::Or(_) => {}, // Correct (self.a || self.b)
-                     _ => panic!("Expected Or on LHS, got {:?}", exprs[0]),
-                 }
-                 match &exprs[1] {
-                     ExprKind::BinaryOp { .. } => {}, // self.c == 3
-                     _ => panic!("Expected BinaryOp on RHS"),
-                 }
-             }
-             _ => panic!("Expected And as root, got {:?}", result),
+            ExprKind::And(exprs) => {
+                assert_eq!(exprs.len(), 2);
+                match &exprs[0] {
+                    ExprKind::Or(_) => {} // Correct (self.a || self.b)
+                    _ => panic!("Expected Or on LHS, got {:?}", exprs[0]),
+                }
+                match &exprs[1] {
+                    ExprKind::BinaryOp { .. } => {} // self.c == 3
+                    _ => panic!("Expected BinaryOp on RHS"),
+                }
+            }
+            _ => panic!("Expected And as root, got {:?}", result),
         }
     }
 }
@@ -945,6 +945,3 @@ mod tests {
 // ============================================================================
 // Tests
 // ============================================================================
-
-
-

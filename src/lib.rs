@@ -572,12 +572,12 @@ impl<T: ProveInvariant> VerifiableSovereign for Sovereign<T> {
         // True. Only domestic resources can be verified locally.
 
         use alloc::string::ToString;
-        
+
         match self.try_get() {
-             Ok(inner) => inner.verify(),
-             Err(_) => Err(ProofError::InvariantViolated(
-                 "Cannot verify: Resource is exiled (foreign jurisdiction)".to_string()
-             )),
+            Ok(inner) => inner.verify(),
+            Err(_) => Err(ProofError::InvariantViolated(
+                "Cannot verify: Resource is exiled (foreign jurisdiction)".to_string(),
+            )),
         }
     }
 }
