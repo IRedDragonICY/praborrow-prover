@@ -51,6 +51,9 @@ use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use lazy_static::lazy_static;
 #[cfg(feature = "std")]
+// Hashing for verification cache
+pub use sha2;
+#[cfg(feature = "std")]
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -524,6 +527,57 @@ pub trait ProveInvariant {
         {
             // In no_std, we skip caching and verify directly
             self.verify()
+        }
+    }
+}
+
+// ============================================================================
+// VerifiableSovereign Extension Trait
+// ============================================================================
+
+use praborrow_core::Sovereign;
+
+/// Extension trait for `Sovereign<T>` to enable formal verification.
+///
+/// This is implemented in `praborrow-prover` rather than `praborrow-core`
+/// to avoid circular dependencies (Prover depends on Core).
+pub trait VerifiableSovereign {
+    /// Verifies the integrity of the sovereign resource using the SMT solver.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(VerificationToken)`: A cryptographic proof that the resource satisfies all invariants.
+    /// - `Err(ProofError)`: If verification fails or the solver encounters an error.
+    fn verify_integrity(&self) -> Result<VerificationToken, ProofError>;
+}
+
+impl<T: ProveInvariant> VerifiableSovereign for Sovereign<T> {
+    fn verify_integrity(&self) -> Result<VerificationToken, ProofError> {
+        // We verify the resource in its current state.
+        // For 'Sovereign', the T is wrapped in UnsafeCell/Atomic.
+        // We need access to T to verify it.
+        //
+        // SAFETY: We are only reading the data for verification.
+        // Ideally, we should use `try_get` but that requires specific permissions.
+        // For verification, we assume we can inspect the state atomically or that
+        // the caller has ensured quiescence.
+        //
+        // Note: `Sovereign` doesn't expose inner directly safely without `try_get`.
+        // However, `ProveInvariant` methods usually take `&self`.
+        // If `T` implements `ProveInvariant`, we need `&T`.
+        //
+        // Limitation: `Sovereign` by design hides `T`.
+        // We might need to use `try_get()` inside here, but that returns `Option`.
+        // If the resource is annexed, we can't verify it locally?
+        // True. Only domestic resources can be verified locally.
+
+        use alloc::string::ToString;
+        
+        match self.try_get() {
+             Ok(inner) => inner.verify(),
+             Err(_) => Err(ProofError::InvariantViolated(
+                 "Cannot verify: Resource is exiled (foreign jurisdiction)".to_string()
+             )),
         }
     }
 }
