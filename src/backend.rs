@@ -77,33 +77,30 @@ pub mod z3_backend {
 
             // 3. Offload Z3 solving to a blocking thread
             tokio::task::spawn_blocking(move || {
-                // According to compiler errors, Solver::new() and ast constructors 
-                // in this environment do not take Context arguments.
-                // We create a Config/Context to ensure underlying Z3 init, 
-                // but checking if we can pass it.
-                // Compiler said Context::new is private. 
-                // We will try standard init, but if it fails we rely on global/default context.
-                // However, likely we need to construct Context via Config.
-                // If Context::new(&Config) is private, we might need another way.
-                // But error said `Solver::new()` takes 0 arguments.
-                
-                let cfg = Config::new();
-                let ctx = Context::new(&cfg);
-                let solver = Solver::new(&ctx);
-
-                for expr in parsed_exprs {
-                    let mut generator = Z3AstGenerator::new(&ctx, &field_values);
-                    let assertion = generator.generate(&expr)?;
-                    solver.assert(&assertion);
+                thread_local! {
+                    static Z3_CONTEXT: Context = {
+                        let cfg = Config::new();
+                        Context::new(&cfg)
+                    };
                 }
 
-                match solver.check() {
-                    SatResult::Sat => Ok(VerificationToken::new()),
-                    SatResult::Unsat => Err(ProofError::InvariantViolated(
-                        "Solver proved invariant cannot be satisfied".to_string(),
-                    )),
-                    SatResult::Unknown => Err(ProofError::Unknown),
-                }
+                Z3_CONTEXT.with(|ctx| {
+                    let solver = Solver::new(ctx);
+
+                    for expr in parsed_exprs {
+                        let mut generator = Z3AstGenerator::new(ctx, &field_values);
+                        let assertion = generator.generate(&expr)?;
+                        solver.assert(&assertion);
+                    }
+
+                    match solver.check() {
+                        SatResult::Sat => Ok(VerificationToken::new()),
+                        SatResult::Unsat => Err(ProofError::InvariantViolated(
+                            "Solver proved invariant cannot be satisfied".to_string(),
+                        )),
+                        SatResult::Unknown => Err(ProofError::Unknown),
+                    }
+                })
             })
             .await
             .map_err(|e| ProofError::SolverFailure(format!("Task execution failed: {}", e)))?
