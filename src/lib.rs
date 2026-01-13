@@ -40,11 +40,7 @@ pub mod parser;
 extern crate alloc;
 
 #[cfg(feature = "std")]
-use lru::LruCache;
-#[cfg(feature = "std")]
-use std::num::NonZeroUsize;
-#[cfg(feature = "std")]
-use std::sync::Mutex;
+use moka::sync::Cache;
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -241,7 +237,7 @@ pub enum CacheResult {
 /// - The invariant expressions
 #[cfg(feature = "std")]
 pub struct VerificationCache {
-    inner: Mutex<LruCache<[u8; 32], bool>>,
+    inner: Cache<[u8; 32], bool>,
 }
 
 #[cfg(feature = "std")]
@@ -249,9 +245,7 @@ impl VerificationCache {
     /// Creates a new empty cache.
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(LruCache::new(
-                NonZeroUsize::new(10000).expect("Cache size > 0"),
-            )),
+            inner: Cache::new(10000),
         }
     }
 
@@ -268,8 +262,7 @@ impl VerificationCache {
 
     /// Looks up a cached result.
     pub fn lookup(&self, key: &[u8; 32]) -> CacheResult {
-        let mut guard = self.inner.lock().unwrap();
-        match guard.get(key) {
+        match self.inner.get(key) {
             Some(true) => CacheResult::Hit,
             Some(false) => CacheResult::Failed,
             None => CacheResult::Miss,
@@ -278,14 +271,12 @@ impl VerificationCache {
 
     /// Stores a verification result.
     pub fn store(&self, key: [u8; 32], success: bool) {
-        let mut guard = self.inner.lock().unwrap();
-        guard.put(key, success);
+        self.inner.insert(key, success);
     }
 
     /// Clears all cached results.
     pub fn clear(&self) {
-        let mut guard = self.inner.lock().unwrap();
-        guard.clear();
+        self.inner.invalidate_all();
     }
 }
 

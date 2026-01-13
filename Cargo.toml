@@ -32,7 +32,7 @@ sha2 = { workspace = true }
 
 # Core types (CheckProtocol, etc.)
 praborrow-core = { workspace = true }
-lru = { workspace = true }
+moka = { workspace = true }
 
 # Structured logging
 tracing = { workspace = true }
