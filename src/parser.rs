@@ -480,6 +480,68 @@ impl ExpressionParser {
     }
 }
 
+/// Visitor that collects all field names used in an expression.
+pub struct FieldCollector {
+    fields: alloc::collections::BTreeSet<String>,
+}
+
+impl FieldCollector {
+    pub fn new() -> Self {
+        Self {
+            fields: alloc::collections::BTreeSet::new(),
+        }
+    }
+
+    pub fn collect(expr: &ExprKind) -> alloc::collections::BTreeSet<String> {
+        let mut collector = Self::new();
+        collector.visit(expr);
+        collector.fields
+    }
+}
+
+impl ExprVisitor for FieldCollector {
+    type Output = ();
+
+    fn visit_int_literal(&mut self, _value: i64) {}
+    fn visit_uint_literal(&mut self, _value: u64) {}
+    fn visit_boolean_literal(&mut self, _value: bool) {}
+
+    fn visit_field_access(&mut self, field_name: &str) {
+        self.fields.insert(field_name.to_string());
+    }
+
+    fn visit_bitwise_op(&mut self, left: &ExprKind, _op: BitwiseOp, right: &ExprKind) {
+        self.visit(left);
+        self.visit(right);
+    }
+
+    fn visit_arithmetic_op(&mut self, left: &ExprKind, _op: ArithmeticOp, right: &ExprKind) {
+        self.visit(left);
+        self.visit(right);
+    }
+
+    fn visit_binary_op(&mut self, left: &ExprKind, _op: ComparisonOp, right: &ExprKind) {
+        self.visit(left);
+        self.visit(right);
+    }
+
+    fn visit_and(&mut self, exprs: &[ExprKind]) {
+        for e in exprs {
+            self.visit(e);
+        }
+    }
+
+    fn visit_or(&mut self, exprs: &[ExprKind]) {
+        for e in exprs {
+            self.visit(e);
+        }
+    }
+
+    fn visit_not(&mut self, expr: &ExprKind) {
+        self.visit(expr);
+    }
+}
+
 // ============================================================================
 // Verification Interfaces (Used by Macro)
 // ============================================================================
@@ -626,14 +688,14 @@ mod z3_impl {
 
     /// Visitor that generates Z3 AST from parsed expressions.
     pub struct Z3AstGenerator<'prov, 'ctx, P: FieldValueProvider + ?Sized> {
-        provider: &'prov P,
         ctx: &'ctx Context,
+        provider: &'prov P,
     }
 
     impl<'prov, 'ctx, P: FieldValueProvider + ?Sized> Z3AstGenerator<'prov, 'ctx, P> {
         /// Creates a new Z3 AST generator.
         pub fn new(ctx: &'ctx Context, provider: &'prov P) -> Self {
-            Self { provider, ctx }
+            Self { ctx, provider }
         }
 
         /// Generates a Z3 boolean assertion from an expression.
@@ -644,8 +706,8 @@ mod z3_impl {
         /// Helper to get an integer AST from an expression.
         fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
-                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(*v)),
-                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(*v)),
+                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
+                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
                 ExprKind::FieldAccess { field_name } => self.provider.get_field_z3(field_name),
                 ExprKind::ArithmeticOp { left, op, right } => {
                     let left_ast = self.get_int_ast(left)?;

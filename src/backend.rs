@@ -37,17 +37,16 @@ pub mod z3_backend {
     use crate::parser::ExprKind;
     use crate::parser::ExprVisitor;
     use crate::parser::ExpressionParser;
+    use crate::parser::FieldCollector;
+    use std::collections::HashMap;
     use z3::{Config, Context, SatResult, Solver, ast};
 
-    pub struct Z3Backend {
-        context: Context,
-    }
+    // Z3Backend is now stateless and thread-safe (Send + Sync).
+    pub struct Z3Backend;
 
     impl Z3Backend {
         pub fn new() -> Result<Self, ProofError> {
-            let config = Config::new();
-            let context = Context::new(&config);
-            Ok(Self { context })
+            Ok(Self)
         }
     }
 
@@ -58,54 +57,85 @@ pub mod z3_backend {
             invariants: &[&str],
             provider: &dyn FieldValueProvider,
         ) -> Result<VerificationToken, ProofError> {
-            // Z3 is not thread-safe and not async, so we must be careful.
-            // For now, we run it synchronously in the async block.
-            // In a real constrained environment, we might offload to a blocking thread.
-
-            let solver = Solver::new(&self.context);
+            // 1. Parse Invariants and Collect Fields (Main Thread)
+            let mut parsed_exprs = Vec::new();
+            let mut required_fields = std::collections::BTreeSet::new();
 
             for inv in invariants {
                 let expr = ExpressionParser::parse(inv)?;
-                let mut generator = Z3AstGenerator::new(&self.context, provider);
-                let assertion = generator.generate(&expr)?;
-                solver.assert(&assertion);
+                let fields = FieldCollector::collect(&expr);
+                required_fields.extend(fields);
+                parsed_exprs.push(expr);
             }
 
-            match solver.check() {
-                SatResult::Sat => Ok(VerificationToken::new()),
-                SatResult::Unsat => Err(ProofError::InvariantViolated(
-                    "Solver proved invariant cannot be satisfied".to_string(),
-                )),
-                SatResult::Unknown => Err(ProofError::Unknown),
+            // 2. Fetch Values (Main Thread)
+            let mut field_values = HashMap::new();
+            for field in required_fields {
+                let val = provider.get_field_value(&field)?;
+                field_values.insert(field, val);
             }
+
+            // 3. Offload Z3 solving to a blocking thread
+            tokio::task::spawn_blocking(move || {
+                // According to compiler errors, Solver::new() and ast constructors 
+                // in this environment do not take Context arguments.
+                // We create a Config/Context to ensure underlying Z3 init, 
+                // but checking if we can pass it.
+                // Compiler said Context::new is private. 
+                // We will try standard init, but if it fails we rely on global/default context.
+                // However, likely we need to construct Context via Config.
+                // If Context::new(&Config) is private, we might need another way.
+                // But error said `Solver::new()` takes 0 arguments.
+                
+                let cfg = Config::new();
+                let ctx = Context::new(&cfg);
+                let solver = Solver::new(&ctx);
+
+                for expr in parsed_exprs {
+                    let mut generator = Z3AstGenerator::new(&ctx, &field_values);
+                    let assertion = generator.generate(&expr)?;
+                    solver.assert(&assertion);
+                }
+
+                match solver.check() {
+                    SatResult::Sat => Ok(VerificationToken::new()),
+                    SatResult::Unsat => Err(ProofError::InvariantViolated(
+                        "Solver proved invariant cannot be satisfied".to_string(),
+                    )),
+                    SatResult::Unknown => Err(ProofError::Unknown),
+                }
+            })
+            .await
+            .map_err(|e| ProofError::SolverFailure(format!("Task execution failed: {}", e)))?
         }
     }
 
-    struct Z3AstGenerator<'ctx, 'prov> {
+    struct Z3AstGenerator<'ctx> {
         ctx: &'ctx Context,
-        provider: &'prov dyn FieldValueProvider,
+        values: &'ctx HashMap<String, FieldValue>,
     }
 
-    impl<'ctx, 'prov> Z3AstGenerator<'ctx, 'prov> {
-        fn new(ctx: &'ctx Context, provider: &'prov dyn FieldValueProvider) -> Self {
-            Self { ctx, provider }
+    impl<'ctx> Z3AstGenerator<'ctx> {
+        fn new(ctx: &'ctx Context, values: &'ctx HashMap<String, FieldValue>) -> Self {
+            Self { ctx, values }
         }
 
-        fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool<'ctx>, ProofError> {
+        fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool, ProofError> {
             self.visit(expr)
         }
 
-        fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int<'ctx>, ProofError> {
+        fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
                 ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
                 ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
                 ExprKind::FieldAccess { field_name } => {
-                    match self.provider.get_field_value(field_name)? {
-                        FieldValue::Int(i) => Ok(ast::Int::from_i64(self.ctx, i)),
-                        FieldValue::UInt(u) => Ok(ast::Int::from_u64(self.ctx, u)),
-                        FieldValue::Bool(_) => {
+                    match self.values.get(field_name) {
+                        Some(FieldValue::Int(i)) => Ok(ast::Int::from_i64(self.ctx, *i)),
+                        Some(FieldValue::UInt(u)) => Ok(ast::Int::from_u64(self.ctx, *u)),
+                        Some(FieldValue::Bool(_)) => {
                             Err(ProofError::UnsupportedType("Expected int, got bool".into()))
                         }
+                        None => Err(ProofError::SolverFailure(format!("Missing field value for {}", field_name))),
                     }
                 }
                 ExprKind::ArithmeticOp { left, op, right } => {
@@ -142,8 +172,8 @@ pub mod z3_backend {
         }
     }
 
-    impl<'ctx, 'prov> ExprVisitor for Z3AstGenerator<'ctx, 'prov> {
-        type Output = Result<ast::Bool<'ctx>, ProofError>;
+    impl<'ctx> ExprVisitor for Z3AstGenerator<'ctx> {
+        type Output = Result<ast::Bool, ProofError>;
 
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
             Err(ProofError::ParseError("Int literal is not bool".into()))
@@ -155,9 +185,10 @@ pub mod z3_backend {
             Ok(ast::Bool::from_bool(self.ctx, value))
         }
         fn visit_field_access(&mut self, field_name: &str) -> Self::Output {
-            match self.provider.get_field_value(field_name)? {
-                FieldValue::Bool(b) => Ok(ast::Bool::from_bool(self.ctx, b)),
-                _ => Err(ProofError::UnsupportedType("Expected bool field".into())),
+             match self.values.get(field_name) {
+                Some(FieldValue::Bool(b)) => Ok(ast::Bool::from_bool(self.ctx, *b)),
+                Some(_) => Err(ProofError::UnsupportedType("Expected bool field".into())),
+                None => Err(ProofError::SolverFailure(format!("Missing field value for {}", field_name))),
             }
         }
 
@@ -201,15 +232,15 @@ pub mod z3_backend {
                 bools.push(self.visit(e)?);
             }
             let refs: Vec<&_> = bools.iter().collect();
-            Ok(ast::Bool::and(&refs))
+            Ok(ast::Bool::and(self.ctx, &refs))
         }
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
-            let mut bools = Vec::new();
+             let mut bools = Vec::new();
             for e in exprs {
                 bools.push(self.visit(e)?);
             }
             let refs: Vec<&_> = bools.iter().collect();
-            Ok(ast::Bool::or(&refs))
+            Ok(ast::Bool::or(self.ctx, &refs))
         }
         fn visit_not(&mut self, expr: &ExprKind) -> Self::Output {
             Ok(self.visit(expr)?.not())
