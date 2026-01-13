@@ -58,12 +58,10 @@ pub use sha2;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-
 // ... (skipping Z3 imports which remain the same) ...
 
 // Re-export types from core for convenience
-pub use praborrow_core::{ProofCarrying, AnnexError};
-
+pub use praborrow_core::{AnnexError, ProofCarrying};
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
@@ -251,7 +249,9 @@ impl VerificationCache {
     /// Creates a new empty cache.
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(LruCache::new(NonZeroUsize::new(10000).expect("Cache size > 0"))),
+            inner: Mutex::new(LruCache::new(
+                NonZeroUsize::new(10000).expect("Cache size > 0"),
+            )),
         }
     }
 
@@ -332,7 +332,6 @@ impl SmtContext {
     }
 }
 
-
 // ============================================================================
 // ProveInvariant Trait
 // ============================================================================
@@ -349,7 +348,9 @@ pub trait ProveInvariant: Send + Sync {
     fn get_field_provider(&self) -> alloc::boxed::Box<dyn backend::FieldValueProvider + '_>;
 
     /// Verifies all invariants.
-    fn verify(&self) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send {
+    fn verify(
+        &self,
+    ) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send {
         async move {
             let ctx = SmtContext::new()?;
             self.verify_with_context(&ctx).await
@@ -357,16 +358,19 @@ pub trait ProveInvariant: Send + Sync {
     }
 
     /// Verifies invariants using a specific SMT context.
-    fn verify_with_context(&self, ctx: &SmtContext) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send;
+    fn verify_with_context(
+        &self,
+        ctx: &SmtContext,
+    ) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send;
 }
-
-
 
 // ============================================================================
 // VerifiedAnnex Trait
 // ============================================================================
 pub trait VerifiedAnnex<T> {
-    fn annex_verified(&self) -> impl core::future::Future<Output = Result<crate::ProofCarrying<()>, crate::AnnexError>> + Send;
+    fn annex_verified(
+        &self,
+    ) -> impl core::future::Future<Output = Result<crate::ProofCarrying<()>, crate::AnnexError>> + Send;
 }
 
 // ============================================================================

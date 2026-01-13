@@ -31,12 +31,12 @@ pub trait SolverBackend: Send + Sync {
 #[cfg(feature = "z3-backend")]
 pub mod z3_backend {
     use super::*;
-    use crate::parser::ExpressionParser;
-    use crate::parser::ExprVisitor;
-    use crate::parser::ExprKind;
-    use crate::parser::ComparisonOp;
-    use crate::parser::BitwiseOp;
     use crate::parser::ArithmeticOp;
+    use crate::parser::BitwiseOp;
+    use crate::parser::ComparisonOp;
+    use crate::parser::ExprKind;
+    use crate::parser::ExprVisitor;
+    use crate::parser::ExpressionParser;
     use z3::{Config, Context, SatResult, Solver, ast};
 
     pub struct Z3Backend {
@@ -61,9 +61,9 @@ pub mod z3_backend {
             // Z3 is not thread-safe and not async, so we must be careful.
             // For now, we run it synchronously in the async block.
             // In a real constrained environment, we might offload to a blocking thread.
-            
+
             let solver = Solver::new(&self.context);
-            
+
             for inv in invariants {
                 let expr = ExpressionParser::parse(inv)?;
                 let mut generator = Z3AstGenerator::new(&self.context, provider);
@@ -96,16 +96,18 @@ pub mod z3_backend {
         }
 
         fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int<'ctx>, ProofError> {
-             match expr {
+            match expr {
                 ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
                 ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
                 ExprKind::FieldAccess { field_name } => {
                     match self.provider.get_field_value(field_name)? {
                         FieldValue::Int(i) => Ok(ast::Int::from_i64(self.ctx, i)),
                         FieldValue::UInt(u) => Ok(ast::Int::from_u64(self.ctx, u)),
-                        FieldValue::Bool(_) => Err(ProofError::UnsupportedType("Expected int, got bool".into())),
+                        FieldValue::Bool(_) => {
+                            Err(ProofError::UnsupportedType("Expected int, got bool".into()))
+                        }
                     }
-                },
+                }
                 ExprKind::ArithmeticOp { left, op, right } => {
                     let left_ast = self.get_int_ast(left)?;
                     let right_ast = self.get_int_ast(right)?;
@@ -144,29 +146,43 @@ pub mod z3_backend {
         type Output = Result<ast::Bool<'ctx>, ProofError>;
 
         fn visit_int_literal(&mut self, _value: i64) -> Self::Output {
-             Err(ProofError::ParseError("Int literal is not bool".into()))
+            Err(ProofError::ParseError("Int literal is not bool".into()))
         }
         fn visit_uint_literal(&mut self, _value: u64) -> Self::Output {
-             Err(ProofError::ParseError("UInt literal is not bool".into()))
+            Err(ProofError::ParseError("UInt literal is not bool".into()))
         }
         fn visit_boolean_literal(&mut self, value: bool) -> Self::Output {
             Ok(ast::Bool::from_bool(self.ctx, value))
         }
         fn visit_field_access(&mut self, field_name: &str) -> Self::Output {
-             match self.provider.get_field_value(field_name)? {
+            match self.provider.get_field_value(field_name)? {
                 FieldValue::Bool(b) => Ok(ast::Bool::from_bool(self.ctx, b)),
                 _ => Err(ProofError::UnsupportedType("Expected bool field".into())),
-             }
+            }
         }
 
         fn visit_bitwise_op(&mut self, _: &ExprKind, _: BitwiseOp, _: &ExprKind) -> Self::Output {
-             Err(ProofError::UnsupportedType("Bitwise op returns int, not bool".into()))
+            Err(ProofError::UnsupportedType(
+                "Bitwise op returns int, not bool".into(),
+            ))
         }
-        fn visit_arithmetic_op(&mut self, _: &ExprKind, _: ArithmeticOp, _: &ExprKind) -> Self::Output {
-             Err(ProofError::UnsupportedType("Arithmetic op returns int, not bool".into()))
+        fn visit_arithmetic_op(
+            &mut self,
+            _: &ExprKind,
+            _: ArithmeticOp,
+            _: &ExprKind,
+        ) -> Self::Output {
+            Err(ProofError::UnsupportedType(
+                "Arithmetic op returns int, not bool".into(),
+            ))
         }
 
-        fn visit_binary_op(&mut self, left: &ExprKind, op: ComparisonOp, right: &ExprKind) -> Self::Output {
+        fn visit_binary_op(
+            &mut self,
+            left: &ExprKind,
+            op: ComparisonOp,
+            right: &ExprKind,
+        ) -> Self::Output {
             let left_ast = self.get_int_ast(left)?;
             let right_ast = self.get_int_ast(right)?;
             Ok(match op {
@@ -180,19 +196,23 @@ pub mod z3_backend {
         }
 
         fn visit_and(&mut self, exprs: &[ExprKind]) -> Self::Output {
-             let mut bools = Vec::new();
-             for e in exprs { bools.push(self.visit(e)?); }
-             let refs: Vec<&_> = bools.iter().collect();
-             Ok(ast::Bool::and(&refs))
+            let mut bools = Vec::new();
+            for e in exprs {
+                bools.push(self.visit(e)?);
+            }
+            let refs: Vec<&_> = bools.iter().collect();
+            Ok(ast::Bool::and(&refs))
         }
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
-             let mut bools = Vec::new();
-             for e in exprs { bools.push(self.visit(e)?); }
-             let refs: Vec<&_> = bools.iter().collect();
-             Ok(ast::Bool::or(&refs))
+            let mut bools = Vec::new();
+            for e in exprs {
+                bools.push(self.visit(e)?);
+            }
+            let refs: Vec<&_> = bools.iter().collect();
+            Ok(ast::Bool::or(&refs))
         }
         fn visit_not(&mut self, expr: &ExprKind) -> Self::Output {
-             Ok(self.visit(expr)?.not())
+            Ok(self.visit(expr)?.not())
         }
     }
 }

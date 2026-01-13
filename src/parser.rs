@@ -269,7 +269,6 @@ impl ExpressionParser {
             // However, the prompt specifically says "accept ArithmeticOp recursively" and "The parser currently rejects ArithmeticOp at the root".
             // So we allow it.
             ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => Ok(result),
-
         }
     }
 
@@ -320,8 +319,11 @@ impl ExpressionParser {
                 // We'll use left-associativity for most standard ops
                 let next_min_precedence = precedence + 1;
 
-                let (rhs, rhs_consumed) =
-                    Self::parse_expression_climbing(&tokens[idx..], next_min_precedence, depth + 1)?;
+                let (rhs, rhs_consumed) = Self::parse_expression_climbing(
+                    &tokens[idx..],
+                    next_min_precedence,
+                    depth + 1,
+                )?;
                 idx += rhs_consumed;
 
                 lhs = Self::combine_expr(lhs, &op_str, rhs)?;
