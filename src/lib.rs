@@ -47,6 +47,7 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use lazy_static::lazy_static;
@@ -57,7 +58,12 @@ pub use sha2;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+
 // ... (skipping Z3 imports which remain the same) ...
+
+// Re-export types from core for convenience
+pub use praborrow_core::{ProofCarrying, AnnexError};
+
 
 // Conditional Z3 imports
 #[cfg(feature = "z3-backend")]
@@ -296,239 +302,71 @@ lazy_static! {
     pub static ref GLOBAL_CACHE: VerificationCache = VerificationCache::new();
 }
 
-// ============================================================================
-// Z3 Backend Implementation
-// ============================================================================
+pub mod backend;
+use backend::SolverBackend;
 
 #[cfg(feature = "z3-backend")]
-mod z3_backend {
-    use super::*;
+type BackendImpl = backend::z3_backend::Z3Backend;
 
-    /// Manages the Z3 solver context and configuration.
-    ///
-    /// # Thread Safety
-    ///
-    /// Z3 contexts are NOT thread-safe. Each thread should create its own `SmtContext`.
-    /// The global cache (`GLOBAL_CACHE`) is thread-safe and can be shared.
-    pub struct SmtContext {
-        pub context: Context,
+#[cfg(not(feature = "z3-backend"))]
+type BackendImpl = backend::stub_backend::StubBackend;
+
+/// Manages the SMT context.
+pub struct SmtContext {
+    backend: BackendImpl,
+}
+
+impl SmtContext {
+    pub fn new() -> Result<Self, ProofError> {
+        Ok(Self {
+            backend: BackendImpl::new()?,
+        })
     }
 
-    impl SmtContext {
-        /// Creates a new SMT context with default configuration.
-        pub fn new() -> Result<Self, ProofError> {
-            let config = Config::new();
-            let context = Context::new(&config);
-            Ok(Self { context })
-        }
-
-        /// Creates a new solver for this context.
-        pub fn new_solver(&self) -> Solver {
-            Solver::new(&self.context)
-        }
-
-        /// Checks if assertions are satisfiable using a fresh solver.
-        pub fn check_assertions<'a, I>(
-            &'a self,
-            assertions: I,
-        ) -> Result<VerificationToken, ProofError>
-        where
-            I: IntoIterator<Item = &'a z3::ast::Bool>,
-        {
-            let solver = self.new_solver();
-            for assertion in assertions {
-                solver.assert(assertion);
-            }
-
-            match solver.check() {
-                SatResult::Sat => Ok(VerificationToken::new()),
-                SatResult::Unsat => Err(ProofError::InvariantViolated(
-                    "Solver proved invariant cannot be satisfied".to_string(),
-                )),
-                SatResult::Unknown => Err(ProofError::Unknown),
-            }
-        }
-
-        /// Verifies a set of invariants using the provided field provider.
-        pub fn verify_invariants<P>(
-            &self,
-            provider: &P,
-            invariants: &[&str],
-        ) -> Result<VerificationToken, ProofError>
-        where
-            P: crate::parser::FieldValueProvider + ?Sized,
-        {
-            use crate::parser::{ExpressionParser, Z3AstGenerator};
-
-            // Actually Z3AstGenerator generates 'ctx Bools.
-            // We need to collect them.
-            let mut bools = Vec::new();
-
-            for inv in invariants {
-                let expr = ExpressionParser::parse(inv)?;
-                let mut generator = Z3AstGenerator::new(&self.context, provider);
-                let assertion = generator.generate(&expr)?;
-                bools.push(assertion);
-            }
-
-            let refs: Vec<&_> = bools.iter().collect();
-            self.check_assertions(refs)
-        }
+    pub async fn verify_invariants(
+        &self,
+        provider: &dyn backend::FieldValueProvider,
+        invariants: &[&str],
+    ) -> Result<VerificationToken, ProofError> {
+        self.backend.verify(invariants, provider).await
     }
 }
 
-#[cfg(feature = "z3-backend")]
-pub use z3_backend::SmtContext;
-
-// ============================================================================
-// Stub Backend Implementation (when Z3 is not available)
-// ============================================================================
-
-#[cfg(not(feature = "z3-backend"))]
-mod stub_backend {
-    use super::*;
-
-    /// Stub SMT context when Z3 is not available.
-    ///
-    /// This always returns success. Use the `z3-backend` feature for real verification.
-    ///
-    /// # Warning
-    ///
-    /// This stub provides NO actual verification. It is intended only for:
-    /// - Development environments without Z3 installed
-    /// - Quick prototyping before enabling formal verification
-    ///
-    /// **DO NOT use in production without the `z3-backend` feature enabled.**
-    pub struct SmtContext {
-        pub context: Context,
-    }
-
-    impl SmtContext {
-        /// Creates a new stub context.
-        pub fn new() -> Result<Self, ProofError> {
-            Ok(Self { context: Context })
-        }
-
-        /// Stub verification - always succeeds.
-        ///
-        /// # Warning
-        ///
-        /// This does NOT perform actual SMT verification.
-        /// Enable the `z3-backend` feature for real verification.
-        pub fn verify_stub(&self) -> Result<VerificationToken, ProofError> {
-            // Emit a warning in debug builds to alert developers
-            #[cfg(debug_assertions)]
-            tracing::warn!(
-                target: "praborrow_prover",
-                "⚠️  STUB VERIFICATION: Formal verification passed trivially (Z3 backend disabled). \
-                 This provides NO safety guarantees. DO NOT RELY ON THIS IN PRODUCTION. \
-                 Enable the 'z3-backend' feature for actual SMT verification."
-            );
-
-            // In release builds without z3, still log at trace level
-            #[cfg(not(debug_assertions))]
-            tracing::trace!(
-                target: "praborrow_prover",
-                "Stub verification used (z3-backend feature not enabled)"
-            );
-
-            Ok(VerificationToken::new())
-        }
-
-        pub fn verify_invariants<P>(
-            &self,
-            _provider: &P,
-            _invariants: &[&str],
-        ) -> Result<VerificationToken, ProofError>
-        where
-            P: crate::parser::FieldValueProvider + ?Sized,
-        {
-            self.verify_stub()
-        }
-    }
-
-    impl Default for SmtContext {
-        fn default() -> Self {
-            Self::new().expect("Stub context creation never fails")
-        }
-    }
-}
-
-#[cfg(not(feature = "z3-backend"))]
-pub use stub_backend::SmtContext;
 
 // ============================================================================
 // ProveInvariant Trait
 // ============================================================================
 
 /// Trait for types that can be formally verified.
-///
-/// This trait is implemented by the `#[derive(Constitution)]` macro.
-/// It provides the bridge between Rust types and Z3 SMT logic.
-pub trait ProveInvariant {
+pub trait ProveInvariant: Send + Sync {
     /// Returns the invariant expressions as strings.
-    ///
-    /// These are the raw expressions from `#[invariant("...")]` attributes.
     fn invariant_expressions() -> &'static [&'static str];
 
     /// Computes a hash of the current field values.
-    ///
-    /// Used for cache key generation.
     fn compute_data_hash(&self) -> Vec<u8>;
 
+    /// Gets a field value provider for the instance.
+    fn get_field_provider(&self) -> alloc::boxed::Box<dyn backend::FieldValueProvider + '_>;
+
     /// Verifies all invariants.
-    ///
-    /// # With `z3-backend` feature
-    ///
-    /// Uses Z3 SMT solver for mathematical proof.
-    ///
-    /// # Without `z3-backend` feature
-    ///
-    /// Returns `Ok(VerificationToken)` as a stub (relies on runtime checks).
-    fn verify(&self) -> Result<VerificationToken, ProofError> {
-        let ctx = SmtContext::new()?;
-        self.verify_with_context(&ctx)
+    fn verify(&self) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send {
+        async move {
+            let ctx = SmtContext::new()?;
+            self.verify_with_context(&ctx).await
+        }
     }
 
     /// Verifies invariants using a specific SMT context.
-    ///
-    /// This allows reusing the context for efficiency or custom configuration.
-    fn verify_with_context(&self, ctx: &SmtContext) -> Result<VerificationToken, ProofError>;
+    fn verify_with_context(&self, ctx: &SmtContext) -> impl core::future::Future<Output = Result<VerificationToken, ProofError>> + Send;
+}
 
-    /// Verifies invariants with caching.
-    ///
-    /// First checks the global cache. If miss, runs full verification
-    /// and caches the result.
-    fn verify_cached(&self) -> Result<VerificationToken, ProofError>
-    where
-        Self: Sized,
-    {
-        #[cfg(feature = "std")]
-        {
-            let type_name = std::any::type_name::<Self>();
-            let data_hash = self.compute_data_hash();
-            let invariants = Self::invariant_expressions();
 
-            let cache_key = VerificationCache::compute_key(type_name, &data_hash, invariants);
 
-            match GLOBAL_CACHE.lookup(&cache_key) {
-                CacheResult::Hit => Ok(VerificationToken::new()),
-                CacheResult::Failed => Err(ProofError::InvariantViolated(
-                    "Cached: invariant previously failed".to_string(),
-                )),
-                CacheResult::Miss => {
-                    let result = self.verify();
-                    GLOBAL_CACHE.store(cache_key, result.is_ok());
-                    result
-                }
-            }
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            // In no_std, we skip caching and verify directly
-            self.verify()
-        }
-    }
+// ============================================================================
+// VerifiedAnnex Trait
+// ============================================================================
+pub trait VerifiedAnnex<T> {
+    fn annex_verified(&self) -> impl core::future::Future<Output = Result<crate::ProofCarrying<()>, crate::AnnexError>> + Send;
 }
 
 // ============================================================================
@@ -538,43 +376,16 @@ pub trait ProveInvariant {
 use praborrow_core::Sovereign;
 
 /// Extension trait for `Sovereign<T>` to enable formal verification.
-///
-/// This is implemented in `praborrow-prover` rather than `praborrow-core`
-/// to avoid circular dependencies (Prover depends on Core).
 pub trait VerifiableSovereign {
     /// Verifies the integrity of the sovereign resource using the SMT solver.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(VerificationToken)`: A cryptographic proof that the resource satisfies all invariants.
-    /// - `Err(ProofError)`: If verification fails or the solver encounters an error.
-    fn verify_integrity(&self) -> Result<VerificationToken, ProofError>;
+    #[allow(async_fn_in_trait)]
+    async fn verify_integrity(&self) -> Result<VerificationToken, ProofError>;
 }
 
-impl<T: ProveInvariant> VerifiableSovereign for Sovereign<T> {
-    fn verify_integrity(&self) -> Result<VerificationToken, ProofError> {
-        // We verify the resource in its current state.
-        // For 'Sovereign', the T is wrapped in UnsafeCell/Atomic.
-        // We need access to T to verify it.
-        //
-        // SAFETY: We are only reading the data for verification.
-        // Ideally, we should use `try_get` but that requires specific permissions.
-        // For verification, we assume we can inspect the state atomically or that
-        // the caller has ensured quiescence.
-        //
-        // Note: `Sovereign` doesn't expose inner directly safely without `try_get`.
-        // However, `ProveInvariant` methods usually take `&self`.
-        // If `T` implements `ProveInvariant`, we need `&T`.
-        //
-        // Limitation: `Sovereign` by design hides `T`.
-        // We might need to use `try_get()` inside here, but that returns `Option`.
-        // If the resource is annexed, we can't verify it locally?
-        // True. Only domestic resources can be verified locally.
-
-        use alloc::string::ToString;
-
+impl<T: ProveInvariant + Sync> VerifiableSovereign for Sovereign<T> {
+    async fn verify_integrity(&self) -> Result<VerificationToken, ProofError> {
         match self.try_get() {
-            Ok(inner) => inner.verify(),
+            Ok(inner) => inner.verify().await,
             Err(_) => Err(ProofError::InvariantViolated(
                 "Cannot verify: Resource is exiled (foreign jurisdiction)".to_string(),
             )),

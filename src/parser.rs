@@ -263,12 +263,13 @@ impl ExpressionParser {
             }
 
             // Allow arithmetic/bitwise as they may be part of larger expressions
-            ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => {
-                Err(ProofError::ParseError(
-                    "Expression must be a comparison (e.g., 'self.x > 0'), not just arithmetic"
-                        .to_string(),
-                ))
-            }
+            // Update: We now allow arithmetic/bitwise ops at the root (for flexibility),
+            // though they might not be valid boolean assertions without comparison.
+            // But typical usage in invariants might be `flags & 1` (implicitly boolean in C, but Rust is strict).
+            // However, the prompt specifically says "accept ArithmeticOp recursively" and "The parser currently rejects ArithmeticOp at the root".
+            // So we allow it.
+            ExprKind::ArithmeticOp { .. } | ExprKind::BitwiseOp { .. } => Ok(result),
+
         }
     }
 

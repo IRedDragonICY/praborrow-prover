@@ -36,6 +36,7 @@ lru = { workspace = true }
 
 # Structured logging
 tracing = { workspace = true }
+async-trait.workspace = true
 
 [dev-dependencies]
 # For integration testing
