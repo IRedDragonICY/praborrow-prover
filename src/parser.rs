@@ -485,6 +485,12 @@ pub struct FieldCollector {
     fields: alloc::collections::BTreeSet<String>,
 }
 
+impl Default for FieldCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FieldCollector {
     pub fn new() -> Self {
         Self {

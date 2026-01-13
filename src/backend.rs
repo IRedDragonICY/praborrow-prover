@@ -125,16 +125,17 @@ pub mod z3_backend {
             match expr {
                 ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
                 ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
-                ExprKind::FieldAccess { field_name } => {
-                    match self.values.get(field_name) {
-                        Some(FieldValue::Int(i)) => Ok(ast::Int::from_i64(self.ctx, *i)),
-                        Some(FieldValue::UInt(u)) => Ok(ast::Int::from_u64(self.ctx, *u)),
-                        Some(FieldValue::Bool(_)) => {
-                            Err(ProofError::UnsupportedType("Expected int, got bool".into()))
-                        }
-                        None => Err(ProofError::SolverFailure(format!("Missing field value for {}", field_name))),
+                ExprKind::FieldAccess { field_name } => match self.values.get(field_name) {
+                    Some(FieldValue::Int(i)) => Ok(ast::Int::from_i64(self.ctx, *i)),
+                    Some(FieldValue::UInt(u)) => Ok(ast::Int::from_u64(self.ctx, *u)),
+                    Some(FieldValue::Bool(_)) => {
+                        Err(ProofError::UnsupportedType("Expected int, got bool".into()))
                     }
-                }
+                    None => Err(ProofError::SolverFailure(format!(
+                        "Missing field value for {}",
+                        field_name
+                    ))),
+                },
                 ExprKind::ArithmeticOp { left, op, right } => {
                     let left_ast = self.get_int_ast(left)?;
                     let right_ast = self.get_int_ast(right)?;
@@ -182,10 +183,13 @@ pub mod z3_backend {
             Ok(ast::Bool::from_bool(self.ctx, value))
         }
         fn visit_field_access(&mut self, field_name: &str) -> Self::Output {
-             match self.values.get(field_name) {
+            match self.values.get(field_name) {
                 Some(FieldValue::Bool(b)) => Ok(ast::Bool::from_bool(self.ctx, *b)),
                 Some(_) => Err(ProofError::UnsupportedType("Expected bool field".into())),
-                None => Err(ProofError::SolverFailure(format!("Missing field value for {}", field_name))),
+                None => Err(ProofError::SolverFailure(format!(
+                    "Missing field value for {}",
+                    field_name
+                ))),
             }
         }
 
@@ -232,7 +236,7 @@ pub mod z3_backend {
             Ok(ast::Bool::and(self.ctx, &refs))
         }
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
-             let mut bools = Vec::new();
+            let mut bools = Vec::new();
             for e in exprs {
                 bools.push(self.visit(e)?);
             }
