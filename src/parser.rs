@@ -712,8 +712,8 @@ mod z3_impl {
         /// Helper to get an integer AST from an expression.
         fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
-                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
-                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
+                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(*v)),
+                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(*v)),
                 ExprKind::FieldAccess { field_name } => self.provider.get_field_z3(field_name),
                 ExprKind::ArithmeticOp { left, op, right } => {
                     let left_ast = self.get_int_ast(left)?;
@@ -765,7 +765,7 @@ mod z3_impl {
         }
 
         fn visit_boolean_literal(&mut self, value: bool) -> Self::Output {
-            Ok(ast::Bool::from_bool(self.ctx, value))
+            Ok(ast::Bool::from_bool(value))
         }
 
         fn visit_field_access(&mut self, _field_name: &str) -> Self::Output {

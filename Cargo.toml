@@ -40,6 +40,7 @@ async-trait.workspace = true
 
 [build-dependencies]
 pkg-config = "0.3"
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
 # For integration testing
