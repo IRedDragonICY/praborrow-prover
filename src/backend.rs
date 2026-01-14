@@ -78,30 +78,21 @@ pub mod z3_backend {
 
             // 3. Offload Z3 solving to a blocking thread
             tokio::task::spawn_blocking(move || {
-                thread_local! {
-                    static Z3_CONTEXT: Context = {
-                        let cfg = Config::new();
-                        Context::new(&cfg)
-                    };
+                let solver = Solver::new();
+
+                for expr in parsed_exprs {
+                    let mut generator = Z3AstGenerator::new(&field_values);
+                    let assertion = generator.generate(&expr)?;
+                    solver.assert(&assertion);
                 }
 
-                Z3_CONTEXT.with(|ctx| {
-                    let solver = Solver::new();
-
-                    for expr in parsed_exprs {
-                        let mut generator = Z3AstGenerator::new(ctx, &field_values);
-                        let assertion = generator.generate(&expr)?;
-                        solver.assert(&assertion);
-                    }
-
-                    match solver.check() {
-                        SatResult::Sat => Ok(VerificationToken::new()),
-                        SatResult::Unsat => Err(ProofError::InvariantViolated(
-                            "Solver proved invariant cannot be satisfied".to_string(),
-                        )),
-                        SatResult::Unknown => Err(ProofError::Unknown),
-                    }
-                })
+                match solver.check() {
+                    SatResult::Sat => Ok(VerificationToken::new()),
+                    SatResult::Unsat => Err(ProofError::InvariantViolated(
+                        "Solver proved invariant cannot be satisfied".to_string(),
+                    )),
+                    SatResult::Unknown => Err(ProofError::Unknown),
+                }
             })
             .await
             .map_err(|e| ProofError::SolverFailure(format!("Task execution failed: {}", e)))?
@@ -109,13 +100,12 @@ pub mod z3_backend {
     }
 
     struct Z3AstGenerator<'ctx> {
-        ctx: &'ctx Context,
         values: &'ctx HashMap<String, FieldValue>,
     }
 
     impl<'ctx> Z3AstGenerator<'ctx> {
-        fn new(ctx: &'ctx Context, values: &'ctx HashMap<String, FieldValue>) -> Self {
-            Self { ctx, values }
+        fn new(values: &'ctx HashMap<String, FieldValue>) -> Self {
+            Self { values }
         }
 
         fn generate(&mut self, expr: &ExprKind) -> Result<ast::Bool, ProofError> {
@@ -132,11 +122,11 @@ pub mod z3_backend {
 
         fn get_int_ast(&mut self, expr: &ExprKind) -> Result<ast::Int, ProofError> {
             match expr {
-                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(self.ctx, *v)),
-                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(self.ctx, *v)),
+                ExprKind::IntLiteral(v) => Ok(ast::Int::from_i64(*v)),
+                ExprKind::UIntLiteral(v) => Ok(ast::Int::from_u64(*v)),
                 ExprKind::FieldAccess { field_name } => match self.values.get(field_name) {
-                    Some(FieldValue::Int(i)) => Ok(ast::Int::from_i64(self.ctx, *i)),
-                    Some(FieldValue::UInt(u)) => Ok(ast::Int::from_u64(self.ctx, *u)),
+                    Some(FieldValue::Int(i)) => Ok(ast::Int::from_i64(*i)),
+                    Some(FieldValue::UInt(u)) => Ok(ast::Int::from_u64(*u)),
                     Some(FieldValue::Bool(_)) => {
                         Err(ProofError::UnsupportedType("Expected int, got bool".into()))
                     }
@@ -149,11 +139,11 @@ pub mod z3_backend {
                     let left_ast = self.get_int_ast(left)?;
                     let right_ast = self.get_int_ast(right)?;
                     Ok(match op {
-                        ArithmeticOp::Add => left_ast.add(&right_ast),
-                        ArithmeticOp::Sub => left_ast.sub(&right_ast),
-                        ArithmeticOp::Mul => left_ast.mul(&right_ast),
-                        ArithmeticOp::Div => left_ast.div(&right_ast),
-                        ArithmeticOp::Rem => left_ast.rem(&right_ast),
+                        ArithmeticOp::Add => &left_ast + &right_ast,
+                        ArithmeticOp::Sub => &left_ast - &right_ast,
+                        ArithmeticOp::Mul => &left_ast * &right_ast,
+                        ArithmeticOp::Div => &left_ast / &right_ast,
+                        ArithmeticOp::Rem => &left_ast % &right_ast,
                     })
                 }
                 ExprKind::BitwiseOp { left, op, right } => {
@@ -189,11 +179,11 @@ pub mod z3_backend {
             Err(ProofError::ParseError("UInt literal is not bool".into()))
         }
         fn visit_boolean_literal(&mut self, value: bool) -> Self::Output {
-            Ok(ast::Bool::from_bool(self.ctx, value))
+            Ok(ast::Bool::from_bool(value))
         }
         fn visit_field_access(&mut self, field_name: &str) -> Self::Output {
             match self.values.get(field_name) {
-                Some(FieldValue::Bool(b)) => Ok(ast::Bool::from_bool(self.ctx, *b)),
+                Some(FieldValue::Bool(b)) => Ok(ast::Bool::from_bool(*b)),
                 Some(_) => Err(ProofError::UnsupportedType("Expected bool field".into())),
                 None => Err(ProofError::SolverFailure(format!(
                     "Missing field value for {}",
@@ -242,7 +232,7 @@ pub mod z3_backend {
                 bools.push(self.visit(e)?);
             }
             let refs: Vec<&_> = bools.iter().collect();
-            Ok(ast::Bool::and(self.ctx, &refs))
+            Ok(ast::Bool::and(&refs))
         }
         fn visit_or(&mut self, exprs: &[ExprKind]) -> Self::Output {
             let mut bools = Vec::new();
@@ -250,7 +240,7 @@ pub mod z3_backend {
                 bools.push(self.visit(e)?);
             }
             let refs: Vec<&_> = bools.iter().collect();
-            Ok(ast::Bool::or(self.ctx, &refs))
+            Ok(ast::Bool::or(&refs))
         }
         fn visit_not(&mut self, expr: &ExprKind) -> Self::Output {
             Ok(self.visit(expr)?.not())
